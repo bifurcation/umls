@@ -1,4 +1,4 @@
-#![no_std]
+//#![no_std]
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
@@ -226,7 +226,7 @@ mod common {
     /// An `Opaque` object represents an opaque vector of bytes with a specified maximum size `N`.
     #[derive(Clone, Default, Debug, PartialEq)]
     pub struct Opaque<const N: usize> {
-        data: Vec<u8, N>,
+        pub data: Vec<u8, N>,
     }
 
     impl<const N: usize> ProtocolObject for Opaque<N> {
@@ -251,7 +251,7 @@ mod common {
     /// Attempting to read a slice with length greater than `N` will return an error.
     #[derive(Clone, Default, Debug, PartialEq)]
     pub struct OpaqueView<'a, const N: usize> {
-        data: &'a [u8],
+        pub data: &'a [u8],
     }
 
     impl<'a, const N: usize> ProtocolObjectView<'a> for OpaqueView<'a, N> {
@@ -327,18 +327,18 @@ mod common {
     // XXX(RLB): The lifetime label on the `$inner_view` types must be `'a`.
     // XXX(RLB): Can we synthesize the names of the view types?
     #[macro_export]
-    macro_rules! newtype_protocol {
-        ($outer:ident, $inner:ty, $outer_view:ident, $inner_view:ty) => {
+    macro_rules! newtype_opaque {
+        ($owned_type:ident, $view_type:ident, $size:expr) => {
             #[derive(Clone, Default, Debug, PartialEq)]
-            pub struct $outer($inner);
+            pub struct $owned_type(Opaque<{ $size }>);
 
-            impl ProtocolObject for $outer {
-                const MAX_SIZE: usize = <$inner as ProtocolObject>::MAX_SIZE;
+            impl ProtocolObject for $owned_type {
+                const MAX_SIZE: usize = Opaque::<{ $size }>::MAX_SIZE;
 
-                type View<'a> = $outer_view<'a>;
+                type View<'a> = $view_type<'a>;
 
                 fn as_view<'a>(&'a self) -> Self::View<'a> {
-                    $outer_view(self.0.as_view())
+                    $view_type(self.0.as_view())
                 }
 
                 fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
@@ -346,20 +346,39 @@ mod common {
                 }
             }
 
-            #[derive(Debug, PartialEq)]
-            pub struct $outer_view<'a>($inner_view);
+            impl From<&[u8]> for $owned_type {
+                fn from(data: &[u8]) -> Self {
+                    let mut out = Self::default();
+                    // XXX(RLB) We should avoid this, maybe by implementing TryFrom?
+                    out.0.data.extend_from_slice(data).unwrap();
+                    out
+                }
+            }
 
-            impl<'a> ProtocolObjectView<'a> for $outer_view<'a> {
-                type Owned = $outer;
+            impl AsRef<[u8]> for $owned_type {
+                fn as_ref(&self) -> &[u8] {
+                    self.0.data.as_ref()
+                }
+            }
+
+            #[derive(Debug, PartialEq)]
+            pub struct $view_type<'a>(OpaqueView<'a, { $size }>);
+
+            impl<'a> ProtocolObjectView<'a> for $view_type<'a> {
+                type Owned = $owned_type;
 
                 fn copy_to_owned(&self) -> Self::Owned {
-                    $outer(self.0.copy_to_owned())
+                    $owned_type(self.0.copy_to_owned())
                 }
 
                 fn read_from(reader: &mut impl RefRead<'a>) -> Result<Self, ReadError> {
-                    Ok(Self(<$inner_view as ProtocolObjectView>::read_from(
-                        reader,
-                    )?))
+                    Ok(Self(OpaqueView::read_from(reader)?))
+                }
+            }
+
+            impl<'a> AsRef<[u8]> for $view_type<'a> {
+                fn as_ref(&self) -> &[u8] {
+                    self.0.data.as_ref()
                 }
             }
         };
@@ -368,7 +387,7 @@ mod common {
 
 mod crypto {
     use crate::common::*;
-    use crate::newtype_protocol;
+    use crate::newtype_opaque;
 
     // XXX(RLB) In an ideal world, these constanst would be generics, so that they could be supplied by
     // the application at build time.  However, Rust's support for const generics is not complete
@@ -389,54 +408,38 @@ mod crypto {
         pub const HPKE_PRIVATE_KEY_SIZE: usize = 32;
         pub const HPKE_PUBLIC_KEY_SIZE: usize = 32;
 
-        pub const SIGNATURE_PRIVATE_KEY_SIZE: usize = 32;
+        pub const SIGNATURE_PRIVATE_KEY_SIZE: usize = 64;
         pub const SIGNATURE_PUBLIC_KEY_SIZE: usize = 32;
         pub const SIGNATURE_SIZE: usize = 64;
     }
 
+    #[derive(Debug)]
     pub struct CryptoError(&'static str);
 
-    newtype_protocol!(
-        HashOutput,
-        Opaque<{ consts::HASH_OUTPUT_SIZE }>,
-        HashOutputView,
-        OpaqueView<'a, { consts::HASH_OUTPUT_SIZE }>
-    );
+    newtype_opaque!(HashOutput, HashOutputView, consts::HASH_OUTPUT_SIZE);
 
-    newtype_protocol!(
+    newtype_opaque!(
         HpkePrivateKey,
-        Opaque<{ consts::HPKE_PRIVATE_KEY_SIZE }>,
         HpkePrivateKeyView,
-        OpaqueView<'a, { consts::HPKE_PRIVATE_KEY_SIZE }>
+        consts::HPKE_PRIVATE_KEY_SIZE
     );
-
-    newtype_protocol!(
+    newtype_opaque!(
         HpkePublicKey,
-        Opaque<{ consts::HPKE_PUBLIC_KEY_SIZE }>,
         HpkePublicKeyView,
-        OpaqueView<'a, { consts::HPKE_PUBLIC_KEY_SIZE }>
+        consts::HPKE_PUBLIC_KEY_SIZE
     );
 
-    newtype_protocol!(
+    newtype_opaque!(
         SignaturePrivateKey,
-        Opaque<{ consts::SIGNATURE_PRIVATE_KEY_SIZE }>,
         SignaturePrivateKeyView,
-        OpaqueView<'a, { consts::SIGNATURE_PRIVATE_KEY_SIZE }>
+        consts::SIGNATURE_PRIVATE_KEY_SIZE
     );
-
-    newtype_protocol!(
+    newtype_opaque!(
         SignaturePublicKey,
-        Opaque<{ consts::SIGNATURE_PUBLIC_KEY_SIZE }>,
         SignaturePublicKeyView,
-        OpaqueView<'a, { consts::SIGNATURE_PUBLIC_KEY_SIZE }>
+        consts::SIGNATURE_PUBLIC_KEY_SIZE
     );
-
-    newtype_protocol!(
-        Signature,
-        Opaque<{ consts::SIGNATURE_PUBLIC_KEY_SIZE }>,
-        SignatureView,
-        OpaqueView<'a, { consts::SIGNATURE_PUBLIC_KEY_SIZE }>
-    );
+    newtype_opaque!(Signature, SignatureView, consts::SIGNATURE_SIZE);
 }
 
 #[cfg(all(feature = "rust_crypto", feature = "x25519_aes128gcm_ed25519"))]
@@ -444,77 +447,94 @@ pub mod cipher_suite {
     use crate::common::*;
     use crate::crypto::*;
 
-    // use rand::Rng;
-    // use sha2::Sha256;
+    use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
+    use rand_core::CryptoRngCore;
+    use sha2::{Digest, Sha256};
 
     pub struct Hash {
-        // XXX hash: Sha256,
+        hash: Sha256,
     }
 
     impl Hash {
         pub fn new() -> Self {
             Self {
-                // XXX hash: Sha256::new(),
+                hash: Sha256::new(),
             }
         }
 
         pub fn finalize(self) -> HashOutput {
-            let output = HashOutput::default();
-            // XXX let digest = self.hash.finalize().into_bytes();
-            // XXX output.0 .0.extend_from_slice(digest);
-            output
+            let digest = self.hash.finalize();
+            HashOutput::from(digest.as_slice())
         }
     }
 
     impl Write for Hash {
         fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
-            // XXX self.hash.update(data);
+            self.hash.update(data);
             Ok(data.len())
         }
     }
 
-    pub fn generate_sig() -> Result<(SignaturePrivateKey, SignaturePublicKey), CryptoError> {
-        // XXX let raw_priv = ed25519_dalek::SigningKey::generate(&mut rng);
-        // XXX let raw_pub = raw_priv.verifying_key();
+    pub fn generate_sig(
+        rng: &mut impl CryptoRngCore,
+    ) -> Result<(SignaturePrivateKey, SignaturePublicKey), CryptoError> {
+        let raw_priv = SigningKey::generate(rng);
+        let raw_pub = raw_priv.verifying_key();
 
-        // XXX let priv_bytes = raw_priv.to_keypair_bytes();
-        // XXX let pub_bytes = raw_pub.to_bytes();
+        let priv_bytes = raw_priv.to_keypair_bytes();
+        let pub_bytes = raw_pub.to_bytes();
 
-        todo!(); // Move into Opaque structs
+        let signature_priv = SignaturePrivateKey::from(priv_bytes.as_slice());
+        let signature_key = SignaturePublicKey::from(pub_bytes.as_slice());
+
+        Ok((signature_priv, signature_key))
     }
 
     pub fn sign(
-        digest: HashOutput,
+        message: &[u8],
         signature_priv: SignaturePrivateKeyView,
     ) -> Result<Signature, CryptoError> {
-        // TODO import key data from opaque
+        let priv_bytes = signature_priv.as_ref().try_into().unwrap();
+        let raw_priv = SigningKey::from_keypair_bytes(priv_bytes).unwrap();
 
-        // XXX let raw_priv = ed25519_dalek::SigningKey::from_keypair_bytes(priv_bytes)?;
-        // XXX let raw_sig = raw_priv.sign(digest_bytes).to_bytes();
+        let raw_sig = raw_priv.sign(message.as_ref());
+        let signature = Signature::from(raw_sig.to_bytes().as_slice());
 
-        // TODO export signature to opaque
-
-        todo!();
+        Ok(signature)
     }
 
     pub fn verify(
-        digest: HashOutput,
+        message: &[u8],
         signature_key: SignaturePublicKeyView,
         signature: SignatureView,
     ) -> Result<bool, CryptoError> {
-        // TODO import key bytes from opaque
-        // TODO import digest bytes from opaque
-        // TODO import signature bytes from opaque
+        let key_bytes = signature_key.as_ref().try_into().unwrap();
+        let sig_bytes = signature.as_ref();
 
-        // XXX let raw_sig = ed25519_dalex::Signature::try_from(signature_bytes);
-        // XXX let raw_key = ed25519_dalek::VerifyingKey::from_bytes(key_bytes)?;
-        // XXX ed25519_dalek::Verifier::verify(&raw_key, digest, &signature).is_ok()
+        let raw_key = VerifyingKey::from_bytes(key_bytes).unwrap();
+        let raw_sig = ed25519_dalek::Signature::try_from(sig_bytes).unwrap();
 
-        todo!();
+        let ver = raw_key.verify(message, &raw_sig).is_ok();
+        Ok(ver)
     }
 
     pub fn generate_hpke() -> Result<(HpkePrivateKey, HpkePublicKey), CryptoError> {
         todo!();
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        #[test]
+        fn sign_verify() {
+            let message = b"hello signature";
+            let mut rng = rand::thread_rng();
+            let (sig_priv, sig_pub) = generate_sig(&mut rng).unwrap();
+            let sig = sign(message, sig_priv.as_view()).unwrap();
+            let ver = verify(message, sig_pub.as_view(), sig.as_view()).unwrap();
+            assert!(ver)
+        }
     }
 }
 
@@ -695,10 +715,8 @@ mod protocol {
                 encryption_key,
                 signature_key,
                 credential,
-                capabilities: Default::default(),
                 leaf_node_source,
-                extensions: Default::default(),
-                signature: Default::default(),
+                ..Default::default()
             };
 
             // Serialize the part to be signed into hash
@@ -714,7 +732,9 @@ mod protocol {
             let hash_output = hash.finalize();
 
             // Populate the signature
-            leaf_node.signature = cipher_suite::sign(hash_output, signature_priv.as_view())?;
+            // TODO(RLB): Actually sign serialized thing
+            leaf_node.signature =
+                cipher_suite::sign(hash_output.as_ref(), signature_priv.as_view())?;
 
             let leaf_node_priv = LeafNodePriv {
                 encryption_priv,
