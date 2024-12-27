@@ -31,7 +31,6 @@ mod common {
 
     impl Write for &mut [u8] {
         // https://doc.rust-lang.org/src/std/io/impls.rs.html#366-374
-        #[inline]
         fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
             let amt = core::cmp::min(data.len(), self.len());
             let (a, b) = core::mem::take(self).split_at_mut(amt);
@@ -41,34 +40,68 @@ mod common {
         }
     }
 
+    impl<const N: usize> Write for Vec<u8, N> {
+        fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
+            let remaining = self.capacity() - self.len();
+            let amt = core::cmp::min(data.len(), remaining);
+            self.extend_from_slice(&data[..amt])
+                .map_err(|_| WriteError("Unknown error"))?;
+            Ok(amt)
+        }
+    }
+
     /// A reader trait returns a reference to memory owned by the reader, with the specified
     /// lifetime.
-    pub trait RefRead<'a> {
+    pub trait RefRead<'a>: Clone {
         /// Returns a reference to the first `n` bytes read.  Returns an error if less than `n` bytes
         /// are available.
         fn read(&mut self, n: usize) -> Result<&'a [u8], ReadError>;
+
+        /// How many bytes have been read from this reader
+        fn position(&self) -> usize;
+
+        /// Create a new reader on the same data stream, starting at the current position but
+        /// reading and advancing independently.
+        fn fork(&self) -> Self;
 
         /// Returns a copy of the first byte available.  Returns n error if the reader is empty.
         fn peek(&self) -> Result<u8, ReadError>;
     }
 
-    impl<'a> RefRead<'a> for &'a [u8] {
+    #[derive(Clone)]
+    struct SliceReader<'a> {
+        data: &'a [u8],
+        pos: usize,
+    }
+
+    impl<'a> RefRead<'a> for SliceReader<'a> {
         #[inline]
         fn read(&mut self, n: usize) -> Result<&'a [u8], ReadError> {
-            if self.len() < n {
+            if self.pos + n > self.data.len() {
                 return Err(ReadError("Insufficient data"));
-            } else {
-                let (data, rest) = self.split_at(n);
-                *self = rest;
-                Ok(data)
+            }
+
+            let start = self.pos;
+            self.pos += n;
+            Ok(&self.data[start..self.pos])
+        }
+
+        fn fork(&self) -> Self {
+            Self {
+                data: &self.data[self.pos..],
+                pos: 0,
             }
         }
 
+        fn position(&self) -> usize {
+            self.pos
+        }
+
         fn peek(&self) -> Result<u8, ReadError> {
-            if self.is_empty() {
+            if self.data.is_empty() {
                 Err(ReadError("Insufficient data"))
             } else {
-                Ok(self[0])
+                Ok(self.data[0])
             }
         }
     }
@@ -249,7 +282,7 @@ mod common {
 
     /// An `OpaqueView` object represents a reference to a slice of bytes with maximum size `N`.
     /// Attempting to read a slice with length greater than `N` will return an error.
-    #[derive(Clone, Default, Debug, PartialEq)]
+    #[derive(Copy, Clone, Default, Debug, PartialEq)]
     pub struct OpaqueView<'a, const N: usize> {
         pub data: &'a [u8],
     }
@@ -361,7 +394,7 @@ mod common {
                 }
             }
 
-            #[derive(Debug, PartialEq)]
+            #[derive(Copy, Clone, Debug, PartialEq)]
             pub struct $view_type<'a>(OpaqueView<'a, { $size }>);
 
             impl<'a> ProtocolObjectView<'a> for $view_type<'a> {
@@ -450,6 +483,7 @@ pub mod cipher_suite {
     use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
     use rand_core::CryptoRngCore;
     use sha2::{Digest, Sha256};
+    use x25519_dalek::{PublicKey, StaticSecret};
 
     pub struct Hash {
         hash: Sha256,
@@ -518,8 +552,19 @@ pub mod cipher_suite {
         Ok(ver)
     }
 
-    pub fn generate_hpke() -> Result<(HpkePrivateKey, HpkePublicKey), CryptoError> {
-        todo!();
+    pub fn generate_hpke(
+        rng: &mut impl CryptoRngCore,
+    ) -> Result<(HpkePrivateKey, HpkePublicKey), CryptoError> {
+        let raw_priv = StaticSecret::random_from_rng(rng);
+        let raw_pub = PublicKey::from(&raw_priv);
+
+        let priv_bytes = raw_priv.to_bytes();
+        let pub_bytes = raw_pub.to_bytes();
+
+        let hpke_priv = HpkePrivateKey::from(priv_bytes.as_slice());
+        let hpke_key = HpkePublicKey::from(pub_bytes.as_slice());
+
+        Ok((hpke_priv, hpke_key))
     }
 
     #[cfg(test)]
@@ -542,9 +587,10 @@ mod protocol {
     use crate::cipher_suite;
     use crate::common::*;
     use crate::crypto::*;
-    use hex_literal::hex;
 
-    // use hex_literal::hex;
+    use heapless::Vec;
+    use hex_literal::hex;
+    use rand_core::CryptoRngCore;
 
     const fn max(a: usize, b: usize) -> usize {
         if a < b {
@@ -696,18 +742,20 @@ mod protocol {
         capabilities: Capabilities,
         leaf_node_source: LeafNodeSource,
         extensions: LeafNodeExtensions,
+        to_be_signed: Vec<u8, { Self::MAX_SIZE }>,
         signature: Signature,
     }
 
     impl LeafNode {
         fn new(
+            rng: &mut impl CryptoRngCore,
             leaf_node_source: LeafNodeSource,
             signature_priv: SignaturePrivateKey,
             signature_key: SignaturePublicKey,
             credential: Credential,
         ) -> Result<(LeafNodePriv, LeafNode), CryptoError> {
             // Generate the encryption key pair
-            let (encryption_priv, encryption_key) = cipher_suite::generate_hpke()?;
+            let (encryption_priv, encryption_key) = cipher_suite::generate_hpke(rng)?;
 
             // Create a partial LeafNode object, with the signature blank
 
@@ -722,19 +770,17 @@ mod protocol {
             // Serialize the part to be signed into hash
             // XXX(RLB): Move this to a `sign()` method?
             // TODO(RLB): Replace `unwrap` with actual error handling
-            let mut hash = cipher_suite::Hash::new();
-            leaf_node.encryption_key.write_to(&mut hash).unwrap();
-            leaf_node.signature_key.write_to(&mut hash).unwrap();
-            leaf_node.credential.write_to(&mut hash).unwrap();
-            leaf_node.capabilities.write_to(&mut hash).unwrap();
-            leaf_node.leaf_node_source.write_to(&mut hash).unwrap();
-            leaf_node.extensions.write_to(&mut hash).unwrap();
-            let hash_output = hash.finalize();
+            let tbs = &mut leaf_node.to_be_signed;
+            leaf_node.encryption_key.write_to(tbs).unwrap();
+            leaf_node.signature_key.write_to(tbs).unwrap();
+            leaf_node.credential.write_to(tbs).unwrap();
+            leaf_node.capabilities.write_to(tbs).unwrap();
+            leaf_node.leaf_node_source.write_to(tbs).unwrap();
+            leaf_node.extensions.write_to(tbs).unwrap();
 
             // Populate the signature
-            // TODO(RLB): Actually sign serialized thing
             leaf_node.signature =
-                cipher_suite::sign(hash_output.as_ref(), signature_priv.as_view())?;
+                cipher_suite::sign(&leaf_node.to_be_signed, signature_priv.as_view())?;
 
             let leaf_node_priv = LeafNodePriv {
                 encryption_priv,
@@ -763,6 +809,7 @@ mod protocol {
                 capabilities: self.capabilities.as_view(),
                 leaf_node_source: self.leaf_node_source.as_view(),
                 extensions: self.extensions.as_view(),
+                to_be_signed: &self.to_be_signed,
                 signature: self.signature.as_view(),
             }
         }
@@ -787,13 +834,27 @@ mod protocol {
         capabilities: CapabilitiesView<'a>,
         leaf_node_source: LeafNodeSourceView<'a>,
         extensions: LeafNodeExtensionsView<'a>,
+        to_be_signed: &'a [u8],
         signature: SignatureView<'a>,
+    }
+
+    impl<'a> LeafNodeView<'a> {
+        fn verify(&self) -> Result<bool, CryptoError> {
+            cipher_suite::verify(
+                self.to_be_signed.as_ref(),
+                self.signature_key,
+                self.signature,
+            )
+        }
     }
 
     impl<'a> ProtocolObjectView<'a> for LeafNodeView<'a> {
         type Owned = LeafNode;
 
         fn copy_to_owned(&self) -> Self::Owned {
+            let mut to_be_signed = Vec::new();
+            to_be_signed.extend_from_slice(self.to_be_signed).unwrap();
+
             Self::Owned {
                 encryption_key: self.encryption_key.copy_to_owned(),
                 signature_key: self.signature_key.copy_to_owned(),
@@ -801,18 +862,23 @@ mod protocol {
                 capabilities: self.capabilities.copy_to_owned(),
                 leaf_node_source: self.leaf_node_source.copy_to_owned(),
                 extensions: self.extensions.copy_to_owned(),
+                to_be_signed,
                 signature: self.signature.copy_to_owned(),
             }
         }
 
         fn read_from(reader: &mut impl RefRead<'a>) -> Result<Self, ReadError> {
-            let encryption_key = HpkePublicKeyView::read_from(reader)?;
-            let signature_key = SignaturePublicKeyView::read_from(reader)?;
-            let credential = CredentialView::read_from(reader)?;
-            let capabilities = CapabilitiesView::read_from(reader)?;
-            let leaf_node_source = LeafNodeSourceView::read_from(reader)?;
-            let extensions = LeafNodeExtensionsView::read_from(reader)?;
+            let mut sub_reader = reader.fork();
+            let encryption_key = HpkePublicKeyView::read_from(&mut sub_reader)?;
+            let signature_key = SignaturePublicKeyView::read_from(&mut sub_reader)?;
+            let credential = CredentialView::read_from(&mut sub_reader)?;
+            let capabilities = CapabilitiesView::read_from(&mut sub_reader)?;
+            let leaf_node_source = LeafNodeSourceView::read_from(&mut sub_reader)?;
+            let extensions = LeafNodeExtensionsView::read_from(&mut sub_reader)?;
+
+            let to_be_signed = reader.read(sub_reader.position())?;
             let signature = SignatureView::read_from(reader)?;
+
             Ok(Self {
                 encryption_key,
                 signature_key,
@@ -820,8 +886,31 @@ mod protocol {
                 capabilities,
                 leaf_node_source,
                 extensions,
+                to_be_signed,
                 signature,
             })
+        }
+    }
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+
+        #[test]
+        fn leaf_node_sign_verify() {
+            let rng = &mut rand::thread_rng();
+
+            let (signature_priv, signature_key) = cipher_suite::generate_sig(rng).unwrap();
+            let credential = Credential::default();
+
+            let leaf_node = LeafNode::new(
+                rng,
+                LeafNodeSource::KeyPackage,
+                signature_priv,
+                signature_key,
+                credential,
+            )
+            .unwrap();
         }
     }
 }
