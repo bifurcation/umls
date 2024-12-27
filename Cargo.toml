@@ -3,11 +3,35 @@ name = "umls"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+x25519_aes128gcm_ed25519 = []
+rust_crypto = []
+default = ["x25519_aes128gcm_ed25519", "rust_crypto"]
+
+# TODO(RLB) Groom dependencies, make most of these optional, conditional on features
 [dependencies]
 heapless = "0.8.0"
 hex-literal = "0.4.1"
 hybrid-array = "0.2.3"
 
-[features]
-x25519_aes128gcm_ed25519 = []
-default = ["x25519_aes128gcm_ed25519"]
+# Random
+getrandom = { version = "0.2", default-features = false, optional = true }
+rand_core = { version = "0.6", default-features = false, features = ["alloc"] }
+
+# AEAD
+aes-gcm = { version = "0.10", features = ["zeroize"] }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc", "getrandom"] }
+aead = { version = "0.5", default-features = false, features = ["alloc", "getrandom"] }
+
+# Hash
+sha2 = { version = "0.10", default-features = false }
+
+hmac = { version = "0.12", default-features = false, features = ["reset"] }
+hkdf = { version = "0.12", default-features = false }
+
+# KEM
+p256 = { version = "0.13", default-features = false, features = ["alloc", "ecdh", "ecdsa", "pem"] }
+p384 = { version = "0.13", default-features = false, features = ["alloc", "ecdh", "ecdsa", "pem"] }
+x25519-dalek = { version = "2", default-features = false, features = ["alloc", "static_secrets"] }
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc", "rand_core"] }
+sec1 = { version = "0.7", default-features = false, features = ["alloc"] }

@@ -1,11 +1,15 @@
 #![no_std]
 #![allow(dead_code)]
+#![allow(unused_variables)]
 
 mod common {
     use heapless::Vec;
 
     // XXX(RLB) These hold strings for the moment; we can clean them up and turn them into enums later.
+    #[derive(Debug)]
     pub struct WriteError(pub &'static str);
+
+    #[derive(Debug)]
     pub struct ReadError(pub &'static str);
 
     /// XXX(RLB) The `Write` trait isn't available in `core::io` for some rather silly reasons [1].  We
@@ -318,10 +322,53 @@ mod common {
             }
         }
     }
+
+    // Allow easy instantiation of the newtype pattern
+    // XXX(RLB): The lifetime label on the `$inner_view` types must be `'a`.
+    // XXX(RLB): Can we synthesize the names of the view types?
+    #[macro_export]
+    macro_rules! newtype_protocol {
+        ($outer:ident, $inner:ty, $outer_view:ident, $inner_view:ty) => {
+            #[derive(Clone, Default, Debug, PartialEq)]
+            pub struct $outer($inner);
+
+            impl ProtocolObject for $outer {
+                const MAX_SIZE: usize = <$inner as ProtocolObject>::MAX_SIZE;
+
+                type View<'a> = $outer_view<'a>;
+
+                fn as_view<'a>(&'a self) -> Self::View<'a> {
+                    $outer_view(self.0.as_view())
+                }
+
+                fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
+                    self.0.write_to(writer)
+                }
+            }
+
+            #[derive(Debug, PartialEq)]
+            pub struct $outer_view<'a>($inner_view);
+
+            impl<'a> ProtocolObjectView<'a> for $outer_view<'a> {
+                type Owned = $outer;
+
+                fn copy_to_owned(&self) -> Self::Owned {
+                    $outer(self.0.copy_to_owned())
+                }
+
+                fn read_from(reader: &mut impl RefRead<'a>) -> Result<Self, ReadError> {
+                    Ok(Self(<$inner_view as ProtocolObjectView>::read_from(
+                        reader,
+                    )?))
+                }
+            }
+        };
+    }
 }
 
 mod crypto {
-    use crate::common::{Opaque, OpaqueView};
+    use crate::common::*;
+    use crate::newtype_protocol;
 
     // XXX(RLB) In an ideal world, these constanst would be generics, so that they could be supplied by
     // the application at build time.  However, Rust's support for const generics is not complete
@@ -339,24 +386,140 @@ mod crypto {
 
         pub const HASH_OUTPUT_SIZE: usize = 32;
 
+        pub const HPKE_PRIVATE_KEY_SIZE: usize = 32;
         pub const HPKE_PUBLIC_KEY_SIZE: usize = 32;
 
+        pub const SIGNATURE_PRIVATE_KEY_SIZE: usize = 32;
         pub const SIGNATURE_PUBLIC_KEY_SIZE: usize = 32;
         pub const SIGNATURE_SIZE: usize = 64;
     }
 
-    pub type HashOutput = Opaque<{ consts::HASH_OUTPUT_SIZE }>;
-    pub type HpkePublicKey = Opaque<{ consts::HPKE_PUBLIC_KEY_SIZE }>;
-    pub type SignaturePublicKey = Opaque<{ consts::SIGNATURE_PUBLIC_KEY_SIZE }>;
-    pub type Signature = Opaque<{ consts::SIGNATURE_SIZE }>;
+    pub struct CryptoError(&'static str);
 
-    pub type HashOutputView<'a> = OpaqueView<'a, { consts::HASH_OUTPUT_SIZE }>;
-    pub type HpkePublicKeyView<'a> = OpaqueView<'a, { consts::HPKE_PUBLIC_KEY_SIZE }>;
-    pub type SignaturePublicKeyView<'a> = OpaqueView<'a, { consts::SIGNATURE_PUBLIC_KEY_SIZE }>;
-    pub type SignatureView<'a> = OpaqueView<'a, { consts::SIGNATURE_SIZE }>;
+    newtype_protocol!(
+        HashOutput,
+        Opaque<{ consts::HASH_OUTPUT_SIZE }>,
+        HashOutputView,
+        OpaqueView<'a, { consts::HASH_OUTPUT_SIZE }>
+    );
+
+    newtype_protocol!(
+        HpkePrivateKey,
+        Opaque<{ consts::HPKE_PRIVATE_KEY_SIZE }>,
+        HpkePrivateKeyView,
+        OpaqueView<'a, { consts::HPKE_PRIVATE_KEY_SIZE }>
+    );
+
+    newtype_protocol!(
+        HpkePublicKey,
+        Opaque<{ consts::HPKE_PUBLIC_KEY_SIZE }>,
+        HpkePublicKeyView,
+        OpaqueView<'a, { consts::HPKE_PUBLIC_KEY_SIZE }>
+    );
+
+    newtype_protocol!(
+        SignaturePrivateKey,
+        Opaque<{ consts::SIGNATURE_PRIVATE_KEY_SIZE }>,
+        SignaturePrivateKeyView,
+        OpaqueView<'a, { consts::SIGNATURE_PRIVATE_KEY_SIZE }>
+    );
+
+    newtype_protocol!(
+        SignaturePublicKey,
+        Opaque<{ consts::SIGNATURE_PUBLIC_KEY_SIZE }>,
+        SignaturePublicKeyView,
+        OpaqueView<'a, { consts::SIGNATURE_PUBLIC_KEY_SIZE }>
+    );
+
+    newtype_protocol!(
+        Signature,
+        Opaque<{ consts::SIGNATURE_PUBLIC_KEY_SIZE }>,
+        SignatureView,
+        OpaqueView<'a, { consts::SIGNATURE_PUBLIC_KEY_SIZE }>
+    );
+}
+
+#[cfg(all(feature = "rust_crypto", feature = "x25519_aes128gcm_ed25519"))]
+pub mod cipher_suite {
+    use crate::common::*;
+    use crate::crypto::*;
+
+    // use rand::Rng;
+    // use sha2::Sha256;
+
+    pub struct Hash {
+        // XXX hash: Sha256,
+    }
+
+    impl Hash {
+        pub fn new() -> Self {
+            Self {
+                // XXX hash: Sha256::new(),
+            }
+        }
+
+        pub fn finalize(self) -> HashOutput {
+            let output = HashOutput::default();
+            // XXX let digest = self.hash.finalize().into_bytes();
+            // XXX output.0 .0.extend_from_slice(digest);
+            output
+        }
+    }
+
+    impl Write for Hash {
+        fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
+            // XXX self.hash.update(data);
+            Ok(data.len())
+        }
+    }
+
+    pub fn generate_sig() -> Result<(SignaturePrivateKey, SignaturePublicKey), CryptoError> {
+        // XXX let raw_priv = ed25519_dalek::SigningKey::generate(&mut rng);
+        // XXX let raw_pub = raw_priv.verifying_key();
+
+        // XXX let priv_bytes = raw_priv.to_keypair_bytes();
+        // XXX let pub_bytes = raw_pub.to_bytes();
+
+        todo!(); // Move into Opaque structs
+    }
+
+    pub fn sign(
+        digest: HashOutput,
+        signature_priv: SignaturePrivateKeyView,
+    ) -> Result<Signature, CryptoError> {
+        // TODO import key data from opaque
+
+        // XXX let raw_priv = ed25519_dalek::SigningKey::from_keypair_bytes(priv_bytes)?;
+        // XXX let raw_sig = raw_priv.sign(digest_bytes).to_bytes();
+
+        // TODO export signature to opaque
+
+        todo!();
+    }
+
+    pub fn verify(
+        digest: HashOutput,
+        signature_key: SignaturePublicKeyView,
+        signature: SignatureView,
+    ) -> Result<bool, CryptoError> {
+        // TODO import key bytes from opaque
+        // TODO import digest bytes from opaque
+        // TODO import signature bytes from opaque
+
+        // XXX let raw_sig = ed25519_dalex::Signature::try_from(signature_bytes);
+        // XXX let raw_key = ed25519_dalek::VerifyingKey::from_bytes(key_bytes)?;
+        // XXX ed25519_dalek::Verifier::verify(&raw_key, digest, &signature).is_ok()
+
+        todo!();
+    }
+
+    pub fn generate_hpke() -> Result<(HpkePrivateKey, HpkePublicKey), CryptoError> {
+        todo!();
+    }
 }
 
 mod protocol {
+    use crate::cipher_suite;
     use crate::common::*;
     use crate::crypto::*;
     use hex_literal::hex;
@@ -498,6 +661,13 @@ mod protocol {
         }
     }
 
+    // TODO(RLB) LeafNodePrivView + impl ProtocolObject
+    #[derive(Default, Clone, PartialEq, Debug)]
+    pub struct LeafNodePriv {
+        encryption_priv: HpkePrivateKey,
+        signature_priv: SignaturePrivateKey,
+    }
+
     #[derive(Default, Clone, PartialEq, Debug)]
     pub struct LeafNode {
         encryption_key: HpkePublicKey,
@@ -509,6 +679,51 @@ mod protocol {
         signature: Signature,
     }
 
+    impl LeafNode {
+        fn new(
+            leaf_node_source: LeafNodeSource,
+            signature_priv: SignaturePrivateKey,
+            signature_key: SignaturePublicKey,
+            credential: Credential,
+        ) -> Result<(LeafNodePriv, LeafNode), CryptoError> {
+            // Generate the encryption key pair
+            let (encryption_priv, encryption_key) = cipher_suite::generate_hpke()?;
+
+            // Create a partial LeafNode object, with the signature blank
+
+            let mut leaf_node = LeafNode {
+                encryption_key,
+                signature_key,
+                credential,
+                capabilities: Default::default(),
+                leaf_node_source,
+                extensions: Default::default(),
+                signature: Default::default(),
+            };
+
+            // Serialize the part to be signed into hash
+            // XXX(RLB): Move this to a `sign()` method?
+            // TODO(RLB): Replace `unwrap` with actual error handling
+            let mut hash = cipher_suite::Hash::new();
+            leaf_node.encryption_key.write_to(&mut hash).unwrap();
+            leaf_node.signature_key.write_to(&mut hash).unwrap();
+            leaf_node.credential.write_to(&mut hash).unwrap();
+            leaf_node.capabilities.write_to(&mut hash).unwrap();
+            leaf_node.leaf_node_source.write_to(&mut hash).unwrap();
+            leaf_node.extensions.write_to(&mut hash).unwrap();
+            let hash_output = hash.finalize();
+
+            // Populate the signature
+            leaf_node.signature = cipher_suite::sign(hash_output, signature_priv.as_view())?;
+
+            let leaf_node_priv = LeafNodePriv {
+                encryption_priv,
+                signature_priv,
+            };
+            Ok((leaf_node_priv, leaf_node))
+        }
+    }
+
     impl ProtocolObject for LeafNode {
         const MAX_SIZE: usize = HpkePublicKey::MAX_SIZE
             + SignaturePublicKey::MAX_SIZE
@@ -518,10 +733,18 @@ mod protocol {
             + LeafNodeExtensions::MAX_SIZE
             + Signature::MAX_SIZE;
 
-        type View<'a> = OpaqueView<'a, 5>; // TODO(RLB)
+        type View<'a> = LeafNodeView<'a>;
 
         fn as_view<'a>(&'a self) -> Self::View<'a> {
-            todo!()
+            Self::View {
+                encryption_key: self.encryption_key.as_view(),
+                signature_key: self.signature_key.as_view(),
+                credential: self.credential.as_view(),
+                capabilities: self.capabilities.as_view(),
+                leaf_node_source: self.leaf_node_source.as_view(),
+                extensions: self.extensions.as_view(),
+                signature: self.signature.as_view(),
+            }
         }
 
         fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
