@@ -515,6 +515,7 @@ mod crypto {
 pub mod cipher_suite {
     use crate::common::*;
     use crate::crypto::*;
+    use crate::newtype_opaque;
 
     use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
     use rand_core::CryptoRngCore;
@@ -603,6 +604,45 @@ pub mod cipher_suite {
         Ok((hpke_priv, hpke_key))
     }
 
+    // XXX(RLB): Cleanup needed below this line
+    const MAX_HPKE_PLAINTEXT_SIZE: usize = 32; // KDF.Nh
+    const MAX_KEM_OUTPUT_SIZE: usize = 32; // EC public key size
+    const MAX_HPKE_INNER_CIPHERTEXT_SIZE: usize = MAX_HPKE_PLAINTEXT_SIZE + 16; // auth tag
+
+    newtype_opaque!(HpkePlaintext, HpkePlaintextView, MAX_HPKE_PLAINTEXT_SIZE);
+    newtype_opaque!(KemOutput, KemOutputView, MAX_KEM_OUTPUT_SIZE);
+    newtype_opaque!(
+        HpkeInnerCiphertext,
+        HpkeInnerCiphertextView,
+        MAX_HPKE_INNER_CIPHERTEXT_SIZE
+    );
+
+    // TODO(RLB) ProtocolObject
+    pub struct HpkeCiphertext {
+        kem_output: KemOutput,
+        ciphertext: HpkeInnerCiphertext,
+    }
+
+    // TODO(RLB) ProtocolObjectView
+    pub struct HpkeCiphertextView<'a> {
+        kem_output: KemOutputView<'a>,
+        ciphertext: HpkeInnerCiphertextView<'a>,
+    }
+
+    pub fn encrypt(
+        message: HpkePlaintextView,
+        hpke_key: HpkePublicKeyView,
+    ) -> Result<HpkeCiphertext, CryptoError> {
+        todo!();
+    }
+
+    pub fn decrypt(
+        ciphertext: HpkeCiphertextView,
+        hpke_priv: HpkePrivateKeyView,
+    ) -> Result<HpkePlaintext, CryptoError> {
+        todo!();
+    }
+
     #[cfg(test)]
     mod test {
         use super::*;
@@ -623,6 +663,7 @@ mod protocol {
     use crate::cipher_suite;
     use crate::common::*;
     use crate::crypto::*;
+    use crate::newtype_opaque;
     use crate::newtype_primitive_protocol;
 
     use heapless::Vec;
@@ -640,12 +681,12 @@ mod protocol {
     // XXX(RLB) Similar story here to the cryptographic parameters, except here the need for
     // application modification is even more acute.  We ought to define some options here, with feature
     // flags to select among them.
+    // TODO(RLB) Make this the BasicCredential type, wrap in Credential
     mod consts {
         pub const MAX_CREDENTIAL_SIZE: usize = 128;
     }
 
-    pub type Credential = Opaque<{ consts::MAX_CREDENTIAL_SIZE }>;
-    pub type CredentialView<'a> = OpaqueView<'a, { consts::MAX_CREDENTIAL_SIZE }>;
+    newtype_opaque!(Credential, CredentialView, consts::MAX_CREDENTIAL_SIZE);
 
     #[derive(Copy, Clone, Default, PartialEq, Debug)]
     pub struct Capabilities;
