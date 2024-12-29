@@ -12,6 +12,7 @@ default = ["x25519_aes128gcm_ed25519", "rust_crypto"]
 [dependencies]
 heapless = "0.8.0"
 hex-literal = "0.4.1"
+hex = "0.4.3"
 hybrid-array = "0.2.3"
 
 # Random

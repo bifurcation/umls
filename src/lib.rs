@@ -69,9 +69,15 @@ mod common {
     }
 
     #[derive(Clone)]
-    struct SliceReader<'a> {
+    pub struct SliceReader<'a> {
         data: &'a [u8],
         pos: usize,
+    }
+
+    impl<'a> SliceReader<'a> {
+        pub fn new(data: &'a [u8]) -> Self {
+            Self { data, pos: 0 }
+        }
     }
 
     impl<'a> RefRead<'a> for SliceReader<'a> {
@@ -98,10 +104,10 @@ mod common {
         }
 
         fn peek(&self) -> Result<u8, ReadError> {
-            if self.data.is_empty() {
+            if self.pos >= self.data.len() {
                 Err(ReadError("Insufficient data"))
             } else {
-                Ok(self.data[0])
+                Ok(self.data[self.pos])
             }
         }
     }
@@ -134,10 +140,6 @@ mod common {
     /// bytes comprising the content of an object are held elsewhere.  (Thus, implementations of this
     /// trait will typically be lifetime-bound.)
     pub trait ProtocolObjectView<'a>: Sized {
-        /// The maximum encoded size of this object.  Implementations should not override this
-        /// constant, since it will make them inconsistent with the corresponding ProtocolObject.
-        const MAX_SIZE: usize = Self::Owned::MAX_SIZE;
-
         /// The owned version of this type
         type Owned: ProtocolObject;
 
@@ -165,17 +167,17 @@ mod common {
         }
 
         fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
-            let mut data = self.0.to_be_bytes();
+            let data = &mut self.0.to_be_bytes()[4..];
             if self.0 < (1 << 6) {
-                writer.write_all(&data[3..])?;
+                writer.write_all(&data[3..4])?;
                 Ok(())
             } else if self.0 < (1 << 14) {
                 data[2] |= 0x40;
-                writer.write_all(&data[2..])?;
+                writer.write_all(&data[2..4])?;
                 Ok(())
             } else if self.0 < (1 << 30) {
                 data[0] |= 0x80;
-                writer.write_all(&data)?;
+                writer.write_all(&data[..4])?;
                 Ok(())
             } else {
                 Err(WriteError("Invalid value"))
@@ -359,6 +361,40 @@ mod common {
     // Allow easy instantiation of the newtype pattern
     // XXX(RLB): The lifetime label on the `$inner_view` types must be `'a`.
     // XXX(RLB): Can we synthesize the names of the view types?
+    #[macro_export]
+    macro_rules! newtype_primitive_protocol {
+        ($outer_type:ident, $inner_type:ident) => {
+            #[derive(Copy, Clone, Default, Debug, PartialEq)]
+            pub struct $outer_type($inner_type);
+
+            impl ProtocolObject for $outer_type {
+                const MAX_SIZE: usize = $inner_type::MAX_SIZE;
+
+                type View<'a> = $outer_type;
+
+                fn as_view<'a>(&'a self) -> Self::View<'a> {
+                    *self
+                }
+
+                fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
+                    self.0.write_to(writer)
+                }
+            }
+
+            impl<'a> ProtocolObjectView<'a> for $outer_type {
+                type Owned = $outer_type;
+
+                fn copy_to_owned(&self) -> Self::Owned {
+                    *self
+                }
+
+                fn read_from(reader: &mut impl RefRead<'a>) -> Result<Self, ReadError> {
+                    Ok(Self($inner_type::read_from(reader)?))
+                }
+            }
+        };
+    }
+
     #[macro_export]
     macro_rules! newtype_opaque {
         ($owned_type:ident, $view_type:ident, $size:expr) => {
@@ -587,6 +623,7 @@ mod protocol {
     use crate::cipher_suite;
     use crate::common::*;
     use crate::crypto::*;
+    use crate::newtype_primitive_protocol;
 
     use heapless::Vec;
     use hex_literal::hex;
@@ -634,14 +671,14 @@ mod protocol {
     // TODO(RLB) We should actually implement extension parsing, at least on deserialization, in
     // order to be compatible with other stacks.
     #[derive(Copy, Clone, Default, PartialEq, Debug)]
-    pub struct LeafNodeExtensions;
+    pub struct ExtensionList;
 
-    impl FixedValue for LeafNodeExtensions {
+    impl FixedValue for ExtensionList {
         const FIXED_SELF: &Self = &Self;
         const FIXED_VALUE: &[u8] = &[0];
     }
 
-    type LeafNodeExtensionsView<'a> = &'a LeafNodeExtensions;
+    type ExtensionListView<'a> = &'a ExtensionList;
 
     #[derive(Clone, PartialEq, Debug)]
     pub enum LeafNodeSource {
@@ -741,7 +778,7 @@ mod protocol {
         credential: Credential,
         capabilities: Capabilities,
         leaf_node_source: LeafNodeSource,
-        extensions: LeafNodeExtensions,
+        extensions: ExtensionList,
         to_be_signed: Vec<u8, { Self::MAX_SIZE }>,
         signature: Signature,
     }
@@ -779,6 +816,7 @@ mod protocol {
             leaf_node.extensions.write_to(tbs).unwrap();
 
             // Populate the signature
+            // TODO(RLB) SignWithLabel
             leaf_node.signature =
                 cipher_suite::sign(&leaf_node.to_be_signed, signature_priv.as_view())?;
 
@@ -796,7 +834,7 @@ mod protocol {
             + Credential::MAX_SIZE
             + Capabilities::MAX_SIZE
             + LeafNodeSource::MAX_SIZE
-            + LeafNodeExtensions::MAX_SIZE
+            + ExtensionList::MAX_SIZE
             + Signature::MAX_SIZE;
 
         type View<'a> = LeafNodeView<'a>;
@@ -833,7 +871,7 @@ mod protocol {
         credential: CredentialView<'a>,
         capabilities: CapabilitiesView<'a>,
         leaf_node_source: LeafNodeSourceView<'a>,
-        extensions: LeafNodeExtensionsView<'a>,
+        extensions: ExtensionListView<'a>,
         to_be_signed: &'a [u8],
         signature: SignatureView<'a>,
     }
@@ -874,7 +912,7 @@ mod protocol {
             let credential = CredentialView::read_from(&mut sub_reader)?;
             let capabilities = CapabilitiesView::read_from(&mut sub_reader)?;
             let leaf_node_source = LeafNodeSourceView::read_from(&mut sub_reader)?;
-            let extensions = LeafNodeExtensionsView::read_from(&mut sub_reader)?;
+            let extensions = ExtensionListView::read_from(&mut sub_reader)?;
 
             let to_be_signed = reader.read(sub_reader.position())?;
             let signature = SignatureView::read_from(reader)?;
@@ -892,9 +930,179 @@ mod protocol {
         }
     }
 
+    newtype_primitive_protocol!(ProtocolVersion, u16);
+    newtype_primitive_protocol!(CipherSuite, u16);
+
+    // TODO(RLB) KeyPackagePrivView + impl ProtocolObject
+    #[derive(Default, Clone, PartialEq, Debug)]
+    pub struct KeyPackagePriv {
+        leaf_node_priv: LeafNodePriv,
+        init_priv: HpkePrivateKey,
+    }
+
+    #[derive(Default, Clone, PartialEq, Debug)]
+    pub struct KeyPackage {
+        protocol_version: ProtocolVersion,
+        cipher_suite: CipherSuite,
+        init_key: HpkePublicKey,
+        leaf_node: LeafNode,
+        extensions: ExtensionList,
+        to_be_signed: Vec<u8, { Self::MAX_SIZE }>,
+        signature: Signature,
+    }
+
+    impl KeyPackage {
+        fn new(
+            rng: &mut impl CryptoRngCore,
+            signature_priv: SignaturePrivateKey,
+            signature_key: SignaturePublicKey,
+            credential: Credential,
+        ) -> Result<(KeyPackagePriv, KeyPackage), CryptoError> {
+            // Generate the encryption key pair
+            let (init_priv, init_key) = cipher_suite::generate_hpke(rng)?;
+
+            // Generate the leaf node
+            let (leaf_node_priv, leaf_node) = LeafNode::new(
+                rng,
+                LeafNodeSource::KeyPackage,
+                signature_priv,
+                signature_key,
+                credential,
+            )?;
+
+            // Create a partial KeyPackage object, with the signature blank
+            let mut key_package = KeyPackage {
+                protocol_version: ProtocolVersion(0x0001),
+                cipher_suite: CipherSuite(0x0001),
+                init_key,
+                leaf_node,
+                ..Default::default()
+            };
+
+            // Serialize the part to be signed into hash
+            // XXX(RLB): Move this to a `sign()` method?
+            // TODO(RLB): Replace `unwrap` with actual error handling
+            let tbs = &mut key_package.to_be_signed;
+            key_package.protocol_version.write_to(tbs).unwrap();
+            key_package.cipher_suite.write_to(tbs).unwrap();
+            key_package.init_key.write_to(tbs).unwrap();
+            key_package.leaf_node.write_to(tbs).unwrap();
+            key_package.extensions.write_to(tbs).unwrap();
+
+            // Populate the signature
+            // TODO(RLB) SignWithLabel
+            key_package.signature = cipher_suite::sign(
+                &key_package.to_be_signed,
+                leaf_node_priv.signature_priv.as_view(),
+            )?;
+
+            let key_package_priv = KeyPackagePriv {
+                leaf_node_priv,
+                init_priv,
+            };
+            Ok((key_package_priv, key_package))
+        }
+    }
+
+    impl ProtocolObject for KeyPackage {
+        const MAX_SIZE: usize = ProtocolVersion::MAX_SIZE
+            + CipherSuite::MAX_SIZE
+            + HpkePublicKey::MAX_SIZE
+            + LeafNode::MAX_SIZE
+            + ExtensionList::MAX_SIZE
+            + Signature::MAX_SIZE;
+
+        type View<'a> = KeyPackageView<'a>;
+
+        fn as_view<'a>(&'a self) -> Self::View<'a> {
+            Self::View {
+                protocol_version: self.protocol_version.as_view(),
+                cipher_suite: self.cipher_suite.as_view(),
+                init_key: self.init_key.as_view(),
+                leaf_node: self.leaf_node.as_view(),
+                extensions: self.extensions.as_view(),
+                to_be_signed: &self.to_be_signed,
+                signature: self.signature.as_view(),
+            }
+        }
+
+        fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
+            self.protocol_version.write_to(writer)?;
+            self.cipher_suite.write_to(writer)?;
+            self.init_key.write_to(writer)?;
+            self.leaf_node.write_to(writer)?;
+            self.extensions.write_to(writer)?;
+            self.signature.write_to(writer)?;
+            Ok(())
+        }
+    }
+
+    #[derive(PartialEq, Debug)]
+    pub struct KeyPackageView<'a> {
+        protocol_version: ProtocolVersion,
+        cipher_suite: CipherSuite,
+        init_key: HpkePublicKeyView<'a>,
+        leaf_node: LeafNodeView<'a>,
+        extensions: ExtensionListView<'a>,
+        to_be_signed: &'a [u8],
+        signature: SignatureView<'a>,
+    }
+
+    impl<'a> KeyPackageView<'a> {
+        fn verify(&self) -> Result<bool, CryptoError> {
+            cipher_suite::verify(
+                self.to_be_signed.as_ref(),
+                self.leaf_node.signature_key,
+                self.signature,
+            )
+        }
+    }
+
+    impl<'a> ProtocolObjectView<'a> for KeyPackageView<'a> {
+        type Owned = KeyPackage;
+
+        fn copy_to_owned(&self) -> Self::Owned {
+            let mut to_be_signed = Vec::new();
+            to_be_signed.extend_from_slice(self.to_be_signed).unwrap();
+
+            Self::Owned {
+                protocol_version: self.protocol_version.copy_to_owned(),
+                cipher_suite: self.cipher_suite.copy_to_owned(),
+                init_key: self.init_key.copy_to_owned(),
+                leaf_node: self.leaf_node.copy_to_owned(),
+                extensions: self.extensions.copy_to_owned(),
+                to_be_signed,
+                signature: self.signature.copy_to_owned(),
+            }
+        }
+
+        fn read_from(reader: &mut impl RefRead<'a>) -> Result<Self, ReadError> {
+            let mut sub_reader = reader.fork();
+            let protocol_version = ProtocolVersion::read_from(&mut sub_reader)?;
+            let cipher_suite = CipherSuite::read_from(&mut sub_reader)?;
+            let init_key = HpkePublicKeyView::read_from(&mut sub_reader)?;
+            let leaf_node = LeafNodeView::read_from(&mut sub_reader)?;
+            let extensions = ExtensionListView::read_from(&mut sub_reader)?;
+
+            let to_be_signed = reader.read(sub_reader.position())?;
+            let signature = SignatureView::read_from(reader)?;
+
+            Ok(Self {
+                protocol_version,
+                cipher_suite,
+                init_key,
+                leaf_node,
+                extensions,
+                to_be_signed,
+                signature,
+            })
+        }
+    }
+
     #[cfg(test)]
     mod test {
         use super::*;
+        use crate::common::SliceReader;
 
         #[test]
         fn leaf_node_sign_verify() {
@@ -903,7 +1111,7 @@ mod protocol {
             let (signature_priv, signature_key) = cipher_suite::generate_sig(rng).unwrap();
             let credential = Credential::default();
 
-            let leaf_node = LeafNode::new(
+            let (_leaf_node_priv, leaf_node) = LeafNode::new(
                 rng,
                 LeafNodeSource::KeyPackage,
                 signature_priv,
@@ -911,6 +1119,35 @@ mod protocol {
                 credential,
             )
             .unwrap();
+
+            let mut storage: Vec<u8, { LeafNode::MAX_SIZE }> = Vec::new();
+            leaf_node.write_to(&mut storage).unwrap();
+
+            let mut reader = SliceReader::new(&storage);
+            let leaf_node_view = LeafNodeView::read_from(&mut reader).unwrap();
+
+            let ver = leaf_node_view.verify().unwrap();
+            assert!(ver);
+        }
+
+        #[test]
+        fn key_package_sign_verify() {
+            let rng = &mut rand::thread_rng();
+
+            let (signature_priv, signature_key) = cipher_suite::generate_sig(rng).unwrap();
+            let credential = Credential::default();
+
+            let (_key_package_priv, key_package) =
+                KeyPackage::new(rng, signature_priv, signature_key, credential).unwrap();
+
+            let mut storage: Vec<u8, { KeyPackage::MAX_SIZE }> = Vec::new();
+            key_package.write_to(&mut storage).unwrap();
+
+            let mut reader = SliceReader::new(&storage);
+            let key_package_view = KeyPackageView::read_from(&mut reader).unwrap();
+
+            let ver = key_package_view.verify().unwrap();
+            assert!(ver);
         }
     }
 }
