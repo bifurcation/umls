@@ -218,6 +218,37 @@ mod common {
         }
     }
 
+    // Trivial implementation on the nil type
+    pub type Nil = ();
+
+    pub type NilView<'a> = &'a Nil;
+
+    impl ProtocolObject for Nil {
+        const MAX_SIZE: usize = 0;
+
+        type View<'a> = NilView<'a>;
+
+        fn as_view<'a>(&'a self) -> Self::View<'a> {
+            &()
+        }
+
+        fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
+            Ok(())
+        }
+    }
+
+    impl<'a> ProtocolObjectView<'a> for NilView<'a> {
+        type Owned = ();
+
+        fn copy_to_owned(&self) -> Self::Owned {
+            ()
+        }
+
+        fn read_from(reader: &mut impl RefRead<'a>) -> Result<Self, ReadError> {
+            Ok(&())
+        }
+    }
+
     // Primitive integer types are trivially read/write
     macro_rules! define_primitive_protocol {
         ($int:ty) => {
@@ -356,6 +387,133 @@ mod common {
                 Ok(T::FIXED_SELF)
             }
         }
+    }
+
+    pub const fn sum(array: &[usize]) -> usize {
+        let mut i = 0;
+        let mut sum = 0;
+        while i < array.len() {
+            sum += array[i];
+            i += 1;
+        }
+        sum
+    }
+
+    pub const fn max(array: &[usize]) -> usize {
+        let mut i = 0;
+        let mut max = 0;
+        while i < array.len() {
+            if array[i] > max {
+                max = array[i];
+            }
+            i += 1
+        }
+        max
+    }
+
+    #[macro_export]
+    macro_rules! tls_struct {
+        ($owned_type:ident + $view_type:ident, $($field_name:ident: $field_type:ident + $field_view_type:ident,)*) => {
+            #[derive(Clone, Default, Debug, PartialEq)]
+            struct $owned_type {
+                $($field_name: $field_type,)*
+            }
+
+            #[derive(Clone, Debug, PartialEq)]
+            struct $view_type<'a> {
+                $($field_name: $field_view_type<'a>,)*
+            }
+
+            impl ProtocolObject for $owned_type {
+                const MAX_SIZE: usize = sum(&[$($field_type::MAX_SIZE, )*]);
+
+                type View<'a> = $view_type<'a>;
+
+                fn as_view<'a>(&'a self) -> Self::View<'a> {
+                    Self::View {
+                        $($field_name: self.$field_name.as_view(),)*
+                    }
+                }
+
+                fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
+                    $(self.$field_name.write_to(writer)?;)*
+                    Ok(())
+                }
+            }
+
+            impl<'a> ProtocolObjectView<'a> for $view_type<'a> {
+                type Owned = $owned_type;
+
+                fn copy_to_owned(&self) -> Self::Owned {
+                    Self::Owned {
+                        $($field_name: self.$field_name.copy_to_owned(),)*
+                    }
+                }
+
+                fn read_from(reader: &mut impl RefRead<'a>) -> Result<Self, ReadError> {
+                    Ok(Self{
+                        $($field_name: $field_view_type::read_from(reader)?,)*
+                    })
+                }
+            }
+        }
+    }
+
+    #[macro_export]
+    macro_rules! tls_enum {
+        ($disc_type:ident => $owned_type:ident + $view_type:ident, $($variant_disc:expr => $variant_name:ident($variant_type:ident + $variant_view_type:ident),)*) => {
+            #[derive(Clone, Debug, PartialEq)]
+            enum $owned_type {
+                $($variant_name($variant_type),)*
+            }
+
+            #[derive(Clone, Debug, PartialEq)]
+            enum $view_type<'a> {
+                $($variant_name($variant_view_type<'a>),)*
+            }
+
+            impl ProtocolObject for $owned_type {
+                const MAX_SIZE: usize = $disc_type::MAX_SIZE + max(&[$($variant_type::MAX_SIZE, )*]);
+
+                type View<'a> = $view_type<'a>;
+
+                fn as_view<'a>(&'a self) -> Self::View<'a> {
+                    match self {
+                        $(Self::$variant_name(x) => Self::View::$variant_name(x.as_view()),)*
+                    }
+                }
+
+                fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
+                    match self {
+                        $(
+                        Self::$variant_name(x) => {
+                            $disc_type::write_to(&$variant_disc, writer)?;
+                            x.write_to(writer)
+                        }
+                        )*
+                    }
+                }
+            }
+
+            impl<'a> ProtocolObjectView<'a> for $view_type<'a> {
+                type Owned = $owned_type;
+
+                fn copy_to_owned(&self) -> Self::Owned {
+                    match self {
+                        $(Self::$variant_name(x) => Self::Owned::$variant_name(x.copy_to_owned()),)*
+                    }
+                }
+
+                fn read_from(reader: &mut impl RefRead<'a>) -> Result<Self, ReadError> {
+                    let disc = $disc_type::read_from(reader)?;
+                    match disc {
+                        $($variant_disc => Ok(Self::$variant_name($variant_view_type::read_from(reader)?)),)*
+                        _ => panic!("Invalid encoding"),
+                    }
+                }
+            }
+
+        };
     }
 
     // Allow easy instantiation of the newtype pattern
@@ -663,20 +821,11 @@ mod protocol {
     use crate::cipher_suite;
     use crate::common::*;
     use crate::crypto::*;
-    use crate::newtype_opaque;
-    use crate::newtype_primitive_protocol;
+    use crate::{newtype_opaque, newtype_primitive_protocol, tls_enum, tls_struct};
 
     use heapless::Vec;
     use hex_literal::hex;
     use rand_core::CryptoRngCore;
-
-    const fn max(a: usize, b: usize) -> usize {
-        if a < b {
-            a
-        } else {
-            b
-        }
-    }
 
     // XXX(RLB) Similar story here to the cryptographic parameters, except here the need for
     // application modification is even more acute.  We ought to define some options here, with feature
@@ -721,6 +870,30 @@ mod protocol {
 
     type ExtensionListView<'a> = &'a ExtensionList;
 
+    #[derive(Copy, Clone, Default, PartialEq, Debug)]
+    pub struct Lifetime;
+
+    impl FixedValue for Lifetime {
+        const FIXED_SELF: &Self = &Self;
+        const FIXED_VALUE: &[u8] = &hex!("0000000000000000ffffffffffffffff");
+    }
+
+    type LifetimeView<'a> = &'a Lifetime;
+
+    tls_enum! {
+        u8 => LeafNodeSource + LeafNodeSourceView,
+        1 => KeyPackage(Lifetime + LifetimeView),
+        2 => Update(Nil + NilView),
+        3 => Commit(HashOutput + HashOutputView),
+    }
+
+    impl Default for LeafNodeSource {
+        fn default() -> Self {
+            Self::KeyPackage(Lifetime::default())
+        }
+    }
+
+    /*
     #[derive(Clone, PartialEq, Debug)]
     pub enum LeafNodeSource {
         KeyPackage,
@@ -804,12 +977,12 @@ mod protocol {
             }
         }
     }
+    */
 
-    // TODO(RLB) LeafNodePrivView + impl ProtocolObject
-    #[derive(Default, Clone, PartialEq, Debug)]
-    pub struct LeafNodePriv {
-        encryption_priv: HpkePrivateKey,
-        signature_priv: SignaturePrivateKey,
+    tls_struct! {
+        LeafNodePriv + LeafNodePrivView,
+        encryption_priv: HpkePrivateKey + HpkePrivateKeyView,
+        signature_priv: SignaturePrivateKey + SignaturePrivateKeyView,
     }
 
     #[derive(Default, Clone, PartialEq, Debug)]
@@ -974,11 +1147,10 @@ mod protocol {
     newtype_primitive_protocol!(ProtocolVersion, u16);
     newtype_primitive_protocol!(CipherSuite, u16);
 
-    // TODO(RLB) KeyPackagePrivView + impl ProtocolObject
-    #[derive(Default, Clone, PartialEq, Debug)]
-    pub struct KeyPackagePriv {
-        leaf_node_priv: LeafNodePriv,
-        init_priv: HpkePrivateKey,
+    tls_struct! {
+        KeyPackagePriv + KeyPackagePrivView,
+        leaf_node_priv: LeafNodePriv + LeafNodePrivView,
+        init_priv: HpkePrivateKey + HpkePrivateKeyView,
     }
 
     #[derive(Default, Clone, PartialEq, Debug)]
@@ -1005,7 +1177,7 @@ mod protocol {
             // Generate the leaf node
             let (leaf_node_priv, leaf_node) = LeafNode::new(
                 rng,
-                LeafNodeSource::KeyPackage,
+                LeafNodeSource::KeyPackage(Lifetime::default()),
                 signature_priv,
                 signature_key,
                 credential,
@@ -1154,7 +1326,7 @@ mod protocol {
 
             let (_leaf_node_priv, leaf_node) = LeafNode::new(
                 rng,
-                LeafNodeSource::KeyPackage,
+                LeafNodeSource::default(),
                 signature_priv,
                 signature_key,
                 credential,
