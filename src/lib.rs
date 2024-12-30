@@ -893,106 +893,25 @@ mod protocol {
         }
     }
 
-    /*
-    #[derive(Clone, PartialEq, Debug)]
-    pub enum LeafNodeSource {
-        KeyPackage,
-        Update,
-        Commit(HashOutput),
-    }
-
-    impl LeafNodeSource {
-        const KEY_PACKAGE: u8 = 1;
-        const UPDATE: u8 = 2;
-        const COMMIT: u8 = 3;
-    }
-
-    impl Default for LeafNodeSource {
-        fn default() -> Self {
-            Self::KeyPackage
-        }
-    }
-
-    impl ProtocolObject for LeafNodeSource {
-        const MAX_SIZE: usize = 1 + HashOutput::MAX_SIZE;
-
-        type View<'a> = LeafNodeSourceView<'a>;
-
-        fn as_view<'a>(&'a self) -> Self::View<'a> {
-            match self {
-                Self::KeyPackage => Self::View::KeyPackage,
-                Self::Update => Self::View::Update,
-                Self::Commit(parent_hash) => Self::View::Commit(parent_hash.as_view()),
-            }
-        }
-
-        fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
-            match self {
-                Self::KeyPackage => {
-                    writer.write_all(&[Self::KEY_PACKAGE])?;
-                    u64::MIN.write_to(writer)?;
-                    u64::MAX.write_to(writer)
-                }
-                Self::Update => writer.write_all(&[Self::UPDATE]),
-                Self::Commit(parent_hash) => {
-                    writer.write_all(&[Self::KEY_PACKAGE])?;
-                    parent_hash.write_to(writer)
-                }
-            }
-        }
-    }
-
-    #[derive(PartialEq, Debug)]
-    pub enum LeafNodeSourceView<'a> {
-        KeyPackage,
-        Update,
-        Commit(HashOutputView<'a>),
-    }
-
-    impl<'a> ProtocolObjectView<'a> for LeafNodeSourceView<'a> {
-        type Owned = LeafNodeSource;
-
-        fn copy_to_owned(&self) -> Self::Owned {
-            match self {
-                Self::KeyPackage => Self::Owned::KeyPackage,
-                Self::Update => Self::Owned::Update,
-                Self::Commit(parent_hash) => Self::Owned::Commit(parent_hash.copy_to_owned()),
-            }
-        }
-
-        fn read_from(reader: &mut impl RefRead<'a>) -> Result<Self, ReadError> {
-            let leaf_node_source = reader.read(1)?[0];
-            match leaf_node_source {
-                Self::Owned::KEY_PACKAGE => {
-                    // XXX(RLB) Lifetime is currently ignored; we just read past it
-                    let _lifetime = reader.read(16)?;
-                    Ok(Self::KeyPackage)
-                }
-                Self::Owned::UPDATE => Ok(Self::Update),
-                Self::Owned::COMMIT => {
-                    let parent_hash = HashOutputView::read_from(reader)?;
-                    Ok(Self::Commit(parent_hash))
-                }
-                _ => Err(ReadError("Invalid encoding")),
-            }
-        }
-    }
-    */
-
     tls_struct! {
         LeafNodePriv + LeafNodePrivView,
         encryption_priv: HpkePrivateKey + HpkePrivateKeyView,
         signature_priv: SignaturePrivateKey + SignaturePrivateKeyView,
     }
 
+    tls_struct! {
+        LeafNodeTBS + LeafNodeTBSView,
+        encryption_key: HpkePublicKey + HpkePublicKeyView,
+        signature_key: SignaturePublicKey + SignaturePublicKeyView,
+        credential: Credential + CredentialView,
+        capabilities: Capabilities + CapabilitiesView,
+        leaf_node_source: LeafNodeSource + LeafNodeSourceView,
+        extensions: ExtensionList + ExtensionListView,
+    }
+
     #[derive(Default, Clone, PartialEq, Debug)]
     pub struct LeafNode {
-        encryption_key: HpkePublicKey,
-        signature_key: SignaturePublicKey,
-        credential: Credential,
-        capabilities: Capabilities,
-        leaf_node_source: LeafNodeSource,
-        extensions: ExtensionList,
+        tbs: LeafNodeTBS,
         to_be_signed: Vec<u8, { Self::MAX_SIZE }>,
         signature: Signature,
     }
@@ -1010,7 +929,7 @@ mod protocol {
 
             // Create a partial LeafNode object, with the signature blank
 
-            let mut leaf_node = LeafNode {
+            let tbs = LeafNodeTBS {
                 encryption_key,
                 signature_key,
                 credential,
@@ -1021,58 +940,41 @@ mod protocol {
             // Serialize the part to be signed into hash
             // XXX(RLB): Move this to a `sign()` method?
             // TODO(RLB): Replace `unwrap` with actual error handling
-            let tbs = &mut leaf_node.to_be_signed;
-            leaf_node.encryption_key.write_to(tbs).unwrap();
-            leaf_node.signature_key.write_to(tbs).unwrap();
-            leaf_node.credential.write_to(tbs).unwrap();
-            leaf_node.capabilities.write_to(tbs).unwrap();
-            leaf_node.leaf_node_source.write_to(tbs).unwrap();
-            leaf_node.extensions.write_to(tbs).unwrap();
+            let mut to_be_signed = Vec::new();
+            tbs.write_to(&mut to_be_signed).unwrap();
 
             // Populate the signature
             // TODO(RLB) SignWithLabel
-            leaf_node.signature =
-                cipher_suite::sign(&leaf_node.to_be_signed, signature_priv.as_view())?;
+            let signature = cipher_suite::sign(&to_be_signed, signature_priv.as_view())?;
 
             let leaf_node_priv = LeafNodePriv {
                 encryption_priv,
                 signature_priv,
+            };
+            let leaf_node = LeafNode {
+                tbs,
+                to_be_signed,
+                signature,
             };
             Ok((leaf_node_priv, leaf_node))
         }
     }
 
     impl ProtocolObject for LeafNode {
-        const MAX_SIZE: usize = HpkePublicKey::MAX_SIZE
-            + SignaturePublicKey::MAX_SIZE
-            + Credential::MAX_SIZE
-            + Capabilities::MAX_SIZE
-            + LeafNodeSource::MAX_SIZE
-            + ExtensionList::MAX_SIZE
-            + Signature::MAX_SIZE;
+        const MAX_SIZE: usize = LeafNodeTBS::MAX_SIZE + Signature::MAX_SIZE;
 
         type View<'a> = LeafNodeView<'a>;
 
         fn as_view<'a>(&'a self) -> Self::View<'a> {
             Self::View {
-                encryption_key: self.encryption_key.as_view(),
-                signature_key: self.signature_key.as_view(),
-                credential: self.credential.as_view(),
-                capabilities: self.capabilities.as_view(),
-                leaf_node_source: self.leaf_node_source.as_view(),
-                extensions: self.extensions.as_view(),
+                tbs: self.tbs.as_view(),
                 to_be_signed: &self.to_be_signed,
                 signature: self.signature.as_view(),
             }
         }
 
         fn write_to(&self, writer: &mut impl Write) -> Result<(), WriteError> {
-            self.encryption_key.write_to(writer)?;
-            self.signature_key.write_to(writer)?;
-            self.credential.write_to(writer)?;
-            self.capabilities.write_to(writer)?;
-            self.leaf_node_source.write_to(writer)?;
-            self.extensions.write_to(writer)?;
+            writer.write(&self.to_be_signed)?;
             self.signature.write_to(writer)?;
             Ok(())
         }
@@ -1080,12 +982,7 @@ mod protocol {
 
     #[derive(PartialEq, Debug)]
     pub struct LeafNodeView<'a> {
-        encryption_key: HpkePublicKeyView<'a>,
-        signature_key: SignaturePublicKeyView<'a>,
-        credential: CredentialView<'a>,
-        capabilities: CapabilitiesView<'a>,
-        leaf_node_source: LeafNodeSourceView<'a>,
-        extensions: ExtensionListView<'a>,
+        tbs: LeafNodeTBSView<'a>,
         to_be_signed: &'a [u8],
         signature: SignatureView<'a>,
     }
@@ -1094,7 +991,7 @@ mod protocol {
         fn verify(&self) -> Result<bool, CryptoError> {
             cipher_suite::verify(
                 self.to_be_signed.as_ref(),
-                self.signature_key,
+                self.tbs.signature_key,
                 self.signature,
             )
         }
@@ -1108,12 +1005,7 @@ mod protocol {
             to_be_signed.extend_from_slice(self.to_be_signed).unwrap();
 
             Self::Owned {
-                encryption_key: self.encryption_key.copy_to_owned(),
-                signature_key: self.signature_key.copy_to_owned(),
-                credential: self.credential.copy_to_owned(),
-                capabilities: self.capabilities.copy_to_owned(),
-                leaf_node_source: self.leaf_node_source.copy_to_owned(),
-                extensions: self.extensions.copy_to_owned(),
+                tbs: self.tbs.copy_to_owned(),
                 to_be_signed,
                 signature: self.signature.copy_to_owned(),
             }
@@ -1121,23 +1013,13 @@ mod protocol {
 
         fn read_from(reader: &mut impl RefRead<'a>) -> Result<Self, ReadError> {
             let mut sub_reader = reader.fork();
-            let encryption_key = HpkePublicKeyView::read_from(&mut sub_reader)?;
-            let signature_key = SignaturePublicKeyView::read_from(&mut sub_reader)?;
-            let credential = CredentialView::read_from(&mut sub_reader)?;
-            let capabilities = CapabilitiesView::read_from(&mut sub_reader)?;
-            let leaf_node_source = LeafNodeSourceView::read_from(&mut sub_reader)?;
-            let extensions = ExtensionListView::read_from(&mut sub_reader)?;
+            let tbs = LeafNodeTBSView::read_from(&mut sub_reader)?;
 
             let to_be_signed = reader.read(sub_reader.position())?;
             let signature = SignatureView::read_from(reader)?;
 
             Ok(Self {
-                encryption_key,
-                signature_key,
-                credential,
-                capabilities,
-                leaf_node_source,
-                extensions,
+                tbs,
                 to_be_signed,
                 signature,
             })
@@ -1265,7 +1147,7 @@ mod protocol {
         fn verify(&self) -> Result<bool, CryptoError> {
             cipher_suite::verify(
                 self.to_be_signed.as_ref(),
-                self.leaf_node.signature_key,
+                self.leaf_node.tbs.signature_key,
                 self.signature,
             )
         }
