@@ -132,6 +132,36 @@ primitive_int_serde!(u16 => U16 + U16View);
 primitive_int_serde!(u32 => U32 + U32View);
 primitive_int_serde!(u64 => U64 + U64View);
 
+// Arrays
+
+// XXX(RLB): Note that in order to use these in newtypes / enums / structs, you will need to alias
+// the view type with fixed type and length, so that the only free parameter is the lifetime.
+
+struct Array<T: Serialize, const N: usize>(pub [T; N]);
+
+struct ArrayView<'a, V: Deserialize<'a>, const N: usize>([V; N], PhantomLifetime<'a>);
+
+impl<T: Serialize, const N: usize> Serialize for Array<T, N> {
+    const MAX_SIZE: usize = N * T::MAX_SIZE;
+
+    type Storage = Vec<u8, 0>; // XXX(RLB) This is wrong, but it can't be fixed.
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        for val in self.0.iter() {
+            val.serialize(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl<'a, V: Deserialize<'a>, const N: usize> Deserialize<'a> for ArrayView<'a, V, N> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        let vec: Result<Vec<V, N>> = (0..N).map(|_| V::deserialize(reader)).collect();
+        let arr = vec.and_then(|v| v.into_array().map_err(|_| Error("Unknown error")))?;
+        Ok(Self(arr, PhantomData))
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
