@@ -1,7 +1,12 @@
-//#![no_std]
+#![no_std]
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
+mod common;
+mod io;
+mod syntax;
+
+/*
 mod common {
     use heapless::Vec;
 
@@ -1246,6 +1251,7 @@ mod protocol {
         }
     }
 }
+*/
 
 /*
 
