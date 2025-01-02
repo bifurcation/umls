@@ -1,9 +1,10 @@
 use crate::common::*;
 use crate::io::*;
 use crate::syntax::*;
-use crate::{mls_newtype, mls_newtype_opaque};
+use crate::{mls_newtype, mls_newtype_opaque, mls_newtype_primitive};
 
-use core::ops::Deref;
+use core::marker::PhantomData;
+use core::ops::{Deref, DerefMut};
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use heapless::Vec;
 use rand_core::CryptoRngCore;
@@ -11,7 +12,9 @@ use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
 pub mod consts {
-    pub const CIPHER_SUITE: u16 = 0x0001;
+    use super::CipherSuite;
+
+    pub const CIPHER_SUITE: CipherSuite = CipherSuite(0x0001);
 
     pub const HASH_OUTPUT_SIZE: usize = 32;
 
@@ -23,6 +26,7 @@ pub mod consts {
     pub const SIGNATURE_SIZE: usize = 64;
 }
 
+mls_newtype_primitive! { CipherSuite + CipherSuiteView => u16 }
 pub use consts::CIPHER_SUITE;
 
 mls_newtype_opaque! {

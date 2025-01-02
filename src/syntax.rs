@@ -3,7 +3,6 @@ use crate::io::{CountWriter, ReadRef, Write};
 
 use core::convert::{TryFrom, TryInto};
 use core::marker::PhantomData;
-use core::ops::{Deref, DerefMut};
 use heapless::Vec;
 
 pub trait Serialize {
@@ -46,7 +45,7 @@ pub trait ToOwned {
 // first wrapped using the `mls_newtype!` enum.  This is because the compunding macros assume
 // that the "view" type (the one that implements Deserialize) has a lifetime parameter.
 
-type PhantomLifetime<'a> = PhantomData<&'a ()>;
+pub type PhantomLifetime<'a> = PhantomData<&'a ()>;
 
 #[derive(Default, Clone, Copy, PartialEq, Debug)]
 pub struct Nil;
@@ -85,7 +84,7 @@ impl<'a> ToOwned for NilView<'a> {
 }
 
 macro_rules! primitive_int_serde {
-    ($int:ty => $value_type:ident + $view_type:ident) => {
+    ($int:ty) => {
         impl Serialize for $int {
             const MAX_SIZE: usize = core::mem::size_of::<$int>();
 
@@ -102,20 +101,30 @@ macro_rules! primitive_int_serde {
                 Ok(<$int>::from_be_bytes(array))
             }
         }
+    };
+}
 
+primitive_int_serde!(u8);
+primitive_int_serde!(u16);
+primitive_int_serde!(u32);
+primitive_int_serde!(u64);
+
+#[macro_export]
+macro_rules! mls_newtype_primitive {
+    ($owned_type:ident + $view_type:ident => $int:ty) => {
         #[derive(Default, Clone, Copy, PartialEq, Debug)]
-        pub struct $value_type($int);
+        pub struct $owned_type($int);
 
         #[derive(Clone, Copy, PartialEq, Debug)]
         pub struct $view_type<'a>($int, PhantomLifetime<'a>);
 
-        impl From<$int> for $value_type {
+        impl From<$int> for $owned_type {
             fn from(val: $int) -> Self {
                 Self(val)
             }
         }
 
-        impl Deref for $value_type {
+        impl Deref for $owned_type {
             type Target = $int;
 
             fn deref(&self) -> &Self::Target {
@@ -123,13 +132,13 @@ macro_rules! primitive_int_serde {
             }
         }
 
-        impl DerefMut for $value_type {
+        impl DerefMut for $owned_type {
             fn deref_mut(&mut self) -> &mut Self::Target {
                 &mut self.0
             }
         }
 
-        impl Serialize for $value_type {
+        impl Serialize for $owned_type {
             const MAX_SIZE: usize = core::mem::size_of::<$int>();
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
@@ -157,7 +166,7 @@ macro_rules! primitive_int_serde {
             }
         }
 
-        impl AsView for $value_type {
+        impl AsView for $owned_type {
             type View<'a> = $view_type<'a>;
 
             fn as_view<'a>(&'a self) -> Self::View<'a> {
@@ -166,19 +175,86 @@ macro_rules! primitive_int_serde {
         }
 
         impl<'a> ToOwned for $view_type<'a> {
-            type Owned = $value_type;
+            type Owned = $owned_type;
 
             fn to_owned(&self) -> Self::Owned {
-                $value_type::from(self.0)
+                $owned_type::from(self.0)
             }
         }
     };
 }
 
-primitive_int_serde!(u8 => U8 + U8View);
-primitive_int_serde!(u16 => U16 + U16View);
-primitive_int_serde!(u32 => U32 + U32View);
-primitive_int_serde!(u64 => U64 + U64View);
+// XXX dele
+#[macro_export]
+macro_rules! mls_newtype {
+    ($owned_type:ident + $view_type:ident => $inner_owned_type:ident + $inner_view_type:ident) => {
+        #[derive(Clone, Default, Debug, PartialEq)]
+        pub struct $owned_type($inner_owned_type);
+
+        impl From<$inner_owned_type> for $owned_type {
+            fn from(val: $inner_owned_type) -> Self {
+                Self(val)
+            }
+        }
+
+        impl Deref for $owned_type {
+            type Target = $inner_owned_type;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct $view_type<'a>($inner_view_type<'a>);
+
+        impl<'a> From<$inner_view_type<'a>> for $view_type<'a> {
+            fn from(val: $inner_view_type<'a>) -> Self {
+                Self(val)
+            }
+        }
+
+        impl<'a> Deref for $view_type<'a> {
+            type Target = $inner_view_type<'a>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl Serialize for $owned_type {
+            const MAX_SIZE: usize = $inner_owned_type::MAX_SIZE;
+
+            fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                self.0.serialize(writer)
+            }
+        }
+
+        impl<'a> Deserialize<'a> for $view_type<'a> {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                Ok(Self($inner_view_type::deserialize(reader)?))
+            }
+        }
+
+        impl AsView for $owned_type {
+            type View<'a> = $view_type<'a>;
+
+            fn as_view<'a>(&'a self) -> Self::View<'a> {
+                $view_type::from(self.0.as_view())
+            }
+        }
+
+        impl<'a> ToOwned for $view_type<'a> {
+            type Owned = $owned_type;
+
+            fn to_owned(&self) -> Self::Owned {
+                $owned_type::from(self.0.to_owned())
+            }
+        }
+    };
+}
+
+
 
 #[derive(Default, Copy, Clone, PartialEq, Debug)]
 pub struct Varint(pub usize);
@@ -448,75 +524,6 @@ macro_rules! mls_newtype_opaque {
         impl AsRef<[u8]> for $owned_type {
             fn as_ref(&self) -> &[u8] {
                 self.0.as_ref()
-            }
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! mls_newtype {
-    ($owned_type:ident + $view_type:ident => $inner_owned_type:ident + $inner_view_type:ident) => {
-        #[derive(Clone, Default, Debug, PartialEq)]
-        pub struct $owned_type($inner_owned_type);
-
-        impl From<$inner_owned_type> for $owned_type {
-            fn from(val: $inner_owned_type) -> Self {
-                Self(val)
-            }
-        }
-
-        impl Deref for $owned_type {
-            type Target = $inner_owned_type;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-
-        #[derive(Clone, Debug, PartialEq)]
-        pub struct $view_type<'a>($inner_view_type<'a>);
-
-        impl<'a> From<$inner_view_type<'a>> for $view_type<'a> {
-            fn from(val: $inner_view_type<'a>) -> Self {
-                Self(val)
-            }
-        }
-
-        impl<'a> Deref for $view_type<'a> {
-            type Target = $inner_view_type<'a>;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-
-        impl Serialize for $owned_type {
-            const MAX_SIZE: usize = $inner_owned_type::MAX_SIZE;
-
-            fn serialize(&self, writer: &mut impl Write) -> Result<()> {
-                self.0.serialize(writer)
-            }
-        }
-
-        impl<'a> Deserialize<'a> for $view_type<'a> {
-            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-                Ok(Self($inner_view_type::deserialize(reader)?))
-            }
-        }
-
-        impl AsView for $owned_type {
-            type View<'a> = $view_type<'a>;
-
-            fn as_view<'a>(&'a self) -> Self::View<'a> {
-                $view_type::from(self.0.as_view())
-            }
-        }
-
-        impl<'a> ToOwned for $view_type<'a> {
-            type Owned = $owned_type;
-
-            fn to_owned(&self) -> Self::Owned {
-                $owned_type::from(self.0.to_owned())
             }
         }
     };

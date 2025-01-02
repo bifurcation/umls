@@ -2,15 +2,18 @@ use crate::common::*;
 use crate::crypto::{self, *};
 use crate::io::*;
 use crate::syntax::*;
-use crate::{mls_enum, mls_newtype, mls_newtype_opaque, mls_struct};
+use crate::{mls_enum, mls_newtype, mls_newtype_opaque, mls_newtype_primitive, mls_struct};
 
-use core::ops::Deref;
+use core::marker::PhantomData;
+use core::ops::{Deref, DerefMut};
 use heapless::Vec;
 use rand_core::CryptoRngCore;
 
 mod consts {
-    pub const SUPPORTED_VERSION: u16 = 0x0001; // mls10
-    pub const SUPPORTED_CREDENTIAL_TYPE: u16 = 0x0001; // basic
+    use super::{CredentialType, ProtocolVersion};
+
+    pub const SUPPORTED_VERSION: ProtocolVersion = ProtocolVersion(0x0001); // mls10
+    pub const SUPPORTED_CREDENTIAL_TYPE: CredentialType = CredentialType(0x0001); // basic
 
     pub const MAX_CREDENTIAL_SIZE: usize = 128;
     pub const MAX_PROTOCOL_VERSIONS: usize = 1;
@@ -41,11 +44,10 @@ impl Default for Credential {
 }
 
 // Capabilities
-mls_newtype! { ProtocolVersion + ProtocolVersionView => U16 + U16View }
-mls_newtype! { CipherSuite + CipherSuiteView => U16 + U16View }
-mls_newtype! { ExtensionType + ExtensionTypeView => U16 + U16View }
-mls_newtype! { ProposalType + ProposalTypeView => U16 + U16View }
-mls_newtype! { CredentialType + CredentialTypeView => U16 + U16View }
+mls_newtype_primitive! { ProtocolVersion + ProtocolVersionView => u16 }
+mls_newtype_primitive! { ExtensionType + ExtensionTypeView => u16 }
+mls_newtype_primitive! { ProposalType + ProposalTypeView => u16 }
+mls_newtype_primitive! { CredentialType + CredentialTypeView => u16 }
 
 type ProtocolVersionList = Vec<ProtocolVersion, { consts::MAX_PROTOCOL_VERSIONS }>;
 type ProtocolVersionListView<'a> = Vec<ProtocolVersionView<'a>, { consts::MAX_PROTOCOL_VERSIONS }>;
@@ -72,10 +74,12 @@ mls_struct! {
 }
 
 // Leaf node source
+mls_newtype_primitive! { Timestamp + TimestampView => u64 }
+
 mls_struct! {
     Lifetime + LifetimeView,
-    not_before: U64 + U64View,
-    not_after: U64 + U64View,
+    not_before: Timestamp + TimestampView,
+    not_after: Timestamp + TimestampView,
 }
 
 mls_enum! {
@@ -88,8 +92,8 @@ mls_enum! {
 impl Default for LeafNodeSource {
     fn default() -> Self {
         let infinite_lifetime = Lifetime {
-            not_before: U64::from(0),
-            not_after: U64::from(u64::MAX),
+            not_before: Timestamp(0),
+            not_after: Timestamp(u64::MAX),
         };
         Self::KeyPackage(infinite_lifetime)
     }
@@ -108,10 +112,8 @@ mls_struct! {
     extension_data: ExtensionData + ExtensionDataView,
 }
 
-type ExtensionListData = Vec<Extension, { consts::MAX_EXTENSIONS }>;
-type ExtensionListDataView<'a> = Vec<ExtensionView<'a>, { consts::MAX_EXTENSIONS }>;
-
-mls_newtype! { ExtensionList + ExtensionListView => ExtensionListData + ExtensionListDataView }
+type ExtensionList = Vec<Extension, { consts::MAX_EXTENSIONS }>;
+type ExtensionListView<'a> = Vec<ExtensionView<'a>, { consts::MAX_EXTENSIONS }>;
 
 // LeafNode
 mls_struct! {
@@ -158,17 +160,15 @@ impl LeafNode {
         let mut capabilities = Capabilities::default();
         capabilities
             .versions
-            .push(ProtocolVersion::from(U16::from(consts::SUPPORTED_VERSION)))
+            .push(consts::SUPPORTED_VERSION)
             .map_err(|_| Error("Too many items"))?;
         capabilities
             .cipher_suites
-            .push(CipherSuite::from(U16::from(CIPHER_SUITE)))
+            .push(crypto::CIPHER_SUITE)
             .map_err(|_| Error("Too many items"))?;
         capabilities
             .credentials
-            .push(CredentialType::from(U16::from(
-                consts::SUPPORTED_CREDENTIAL_TYPE,
-            )))
+            .push(consts::SUPPORTED_CREDENTIAL_TYPE)
             .map_err(|_| Error("Too many items"))?;
 
         let (encryption_priv, encryption_key) = crypto::generate_hpke(rng)?;
@@ -317,8 +317,8 @@ impl KeyPackage {
         )?;
 
         let to_be_signed = KeyPackageTbs {
-            protocol_version: ProtocolVersion::from(U16::from(consts::SUPPORTED_VERSION)),
-            cipher_suite: CipherSuite::from(U16::from(crypto::CIPHER_SUITE)),
+            protocol_version: consts::SUPPORTED_VERSION,
+            cipher_suite: crypto::CIPHER_SUITE,
             init_key,
             leaf_node,
             ..Default::default()
