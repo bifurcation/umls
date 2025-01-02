@@ -3,7 +3,9 @@
 #![allow(unused_variables)]
 
 mod common;
+mod crypto;
 mod io;
+mod protocol;
 mod syntax;
 
 /*

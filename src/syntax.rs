@@ -43,16 +43,16 @@ pub trait ToOwned {
 }
 
 // XXX(RLB) Note that these types can only be included in newtypes / structs / enums if they are
-// first wrapped using the `primitive_newtype!` enum.  This is because the compunding macros assume
+// first wrapped using the `mls_newtype!` enum.  This is because the compunding macros assume
 // that the "view" type (the one that implements Deserialize) has a lifetime parameter.
 
 type PhantomLifetime<'a> = PhantomData<&'a ()>;
 
 #[derive(Default, Clone, Copy, PartialEq, Debug)]
-struct Nil;
+pub struct Nil;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-struct NilView<'a>(&'a ());
+pub struct NilView<'a>(&'a ());
 
 impl Serialize for Nil {
     const MAX_SIZE: usize = 0;
@@ -104,10 +104,10 @@ macro_rules! primitive_int_serde {
         }
 
         #[derive(Default, Clone, Copy, PartialEq, Debug)]
-        struct $value_type($int);
+        pub struct $value_type($int);
 
         #[derive(Clone, Copy, PartialEq, Debug)]
-        struct $view_type<'a>($int, PhantomLifetime<'a>);
+        pub struct $view_type<'a>($int, PhantomLifetime<'a>);
 
         impl From<$int> for $value_type {
             fn from(val: $int) -> Self {
@@ -271,7 +271,7 @@ impl<'a> ToOwned for Varint {
 // the view type with fixed type and length, so that the only free parameter is the lifetime.
 
 #[derive(Clone, Default, Debug, PartialEq)]
-struct Vector<T: Serialize, const N: usize>(pub Vec<T, N>);
+pub struct Vector<T: Serialize, const N: usize>(pub Vec<T, N>);
 
 impl<T: Serialize, const N: usize> From<Vec<T, N>> for Vector<T, N> {
     fn from(val: Vec<T, N>) -> Self {
@@ -280,7 +280,7 @@ impl<T: Serialize, const N: usize> From<Vec<T, N>> for Vector<T, N> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct VectorView<'a, V: Deserialize<'a>, const N: usize>(pub Vec<V, N>, PhantomLifetime<'a>);
+pub struct VectorView<'a, V: Deserialize<'a>, const N: usize>(pub Vec<V, N>, PhantomLifetime<'a>);
 
 impl<'a, V: Deserialize<'a>, const N: usize> From<Vec<V, N>> for VectorView<'a, V, N> {
     fn from(val: Vec<V, N>) -> Self {
@@ -344,7 +344,7 @@ impl<'a, V: Deserialize<'a> + ToOwned, const N: usize> ToOwned for VectorView<'a
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
-struct Opaque<const N: usize>(pub Vec<u8, N>);
+pub struct Opaque<const N: usize>(pub Vec<u8, N>);
 
 impl<const N: usize> From<Vec<u8, N>> for Opaque<N> {
     fn from(val: Vec<u8, N>) -> Self {
@@ -353,7 +353,7 @@ impl<const N: usize> From<Vec<u8, N>> for Opaque<N> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct OpaqueView<'a, const N: usize>(pub &'a [u8]);
+pub struct OpaqueView<'a, const N: usize>(pub &'a [u8]);
 
 impl<'a, const N: usize> TryFrom<&'a [u8]> for OpaqueView<'a, N> {
     type Error = Error;
@@ -425,7 +425,7 @@ pub const fn max(array: &[usize]) -> usize {
 macro_rules! mls_newtype {
     ($owned_type:ident + $view_type:ident => $inner_owned_type:ident + $inner_view_type:ident) => {
         #[derive(Clone, Default, Debug, PartialEq)]
-        struct $owned_type($inner_owned_type);
+        pub struct $owned_type($inner_owned_type);
 
         impl From<$inner_owned_type> for $owned_type {
             fn from(val: $inner_owned_type) -> Self {
@@ -442,7 +442,7 @@ macro_rules! mls_newtype {
         }
 
         #[derive(Clone, Debug, PartialEq)]
-        struct $view_type<'a>($inner_view_type<'a>);
+        pub struct $view_type<'a>($inner_view_type<'a>);
 
         impl<'a> From<$inner_view_type<'a>> for $view_type<'a> {
             fn from(val: $inner_view_type<'a>) -> Self {
@@ -491,15 +491,28 @@ macro_rules! mls_newtype {
 }
 
 #[macro_export]
+macro_rules! mls_newtype_opaque {
+    ($owned_type:ident + $view_type:ident, 
+     $inner_owned_type:ident + $inner_view_type:ident, 
+     $size:expr) => {
+        type $inner_owned_type = Opaque<{ $size }>;
+        type $inner_view_type<'a> = OpaqueView<'a, { $size }>;
+        mls_newtype! {
+            $owned_type + $view_type => $inner_owned_type + $inner_view_type
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! mls_struct {
     ($owned_type:ident + $view_type:ident, $($field_name:ident: $field_type:ident + $field_view_type:ident,)*) => {
         #[derive(Clone, Default, Debug, PartialEq)]
-        struct $owned_type {
+        pub struct $owned_type {
             $($field_name: $field_type,)*
         }
 
         #[derive(Clone, Debug, PartialEq)]
-        struct $view_type<'a> {
+        pub struct $view_type<'a> {
             $($field_name: $field_view_type<'a>,)*
         }
 
@@ -546,12 +559,12 @@ macro_rules! mls_struct {
 macro_rules! mls_enum {
     ($disc_type:ident => $owned_type:ident + $view_type:ident, $($variant_disc:expr => $variant_name:ident($variant_type:ident + $variant_view_type:ident),)*) => {
         #[derive(Clone, Debug, PartialEq)]
-        enum $owned_type {
+        pub enum $owned_type {
             $($variant_name($variant_type),)*
         }
 
         #[derive(Clone, Debug, PartialEq)]
-        enum $view_type<'a> {
+        pub enum $view_type<'a> {
             $($variant_name($variant_view_type<'a>),)*
         }
 
