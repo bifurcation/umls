@@ -261,7 +261,6 @@ impl<'a> ToOwned for LeafNodeView<'a> {
     fn to_owned(&self) -> Self::Owned {
         Self::Owned {
             to_be_signed: self.to_be_signed.to_owned(),
-            // Unwrap is safe because the length is guaranteed by construction
             to_be_signed_raw: self.to_be_signed_raw.try_into().unwrap(),
             signature: self.signature.to_owned(),
         }
@@ -279,9 +278,134 @@ mls_struct! {
 }
 
 mls_struct! {
-    KeyPackage + KeyPackageView,
-    to_be_signed: KeyPackageTbs + KeyPackageTbsView,
-    signature: Signature + SignatureView,
+    KeyPackagePriv + KeyPackagePrivView,
+    init_priv: HpkePrivateKey + HpkePrivateKeyView,
+    leaf_node_priv: LeafNodePriv + LeafNodePrivView,
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
+struct KeyPackage {
+    to_be_signed: KeyPackageTbs,
+    to_be_signed_raw: Vec<u8, { Self::MAX_SIZE }>,
+    signature: Signature,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct KeyPackageView<'a> {
+    to_be_signed: KeyPackageTbsView<'a>,
+    to_be_signed_raw: &'a [u8],
+    signature: SignatureView<'a>,
+}
+
+impl KeyPackage {
+    fn new(
+        rng: &mut impl CryptoRngCore,
+        signature_priv: SignaturePrivateKey,
+        signature_key: SignaturePublicKey,
+        credential: Credential,
+    ) -> Result<(KeyPackagePriv, KeyPackage)> {
+        // Create the KeyPackageTbs
+        let (init_priv, init_key) = crypto::generate_hpke(rng)?;
+
+        let (leaf_node_priv, leaf_node) = LeafNode::new(
+            rng,
+            LeafNodeSource::KeyPackage(Lifetime::default()),
+            signature_priv.clone(),
+            signature_key,
+            credential,
+        )?;
+
+        let to_be_signed = KeyPackageTbs {
+            protocol_version: ProtocolVersion::from(U16::from(consts::SUPPORTED_VERSION)),
+            cipher_suite: CipherSuite::from(U16::from(crypto::CIPHER_SUITE)),
+            init_key,
+            leaf_node,
+            ..Default::default()
+        };
+
+        // Serialize the part to be signed
+        let mut to_be_signed_raw = Vec::new();
+        to_be_signed.serialize(&mut to_be_signed_raw)?;
+
+        // Populate the signature
+        // TODO(RLB) SignWithLabel
+        let signature = crypto::sign(&to_be_signed_raw, signature_priv.as_view())?;
+
+        let key_package_priv = KeyPackagePriv {
+            init_priv,
+            leaf_node_priv,
+        };
+        let key_package = KeyPackage {
+            to_be_signed,
+            to_be_signed_raw,
+            signature,
+        };
+        Ok((key_package_priv, key_package))
+    }
+}
+
+impl<'a> KeyPackageView<'a> {
+    fn verify(&self) -> Result<bool> {
+        crypto::verify(
+            self.to_be_signed_raw.as_ref(),
+            self.to_be_signed
+                .leaf_node
+                .to_be_signed
+                .signature_key
+                .clone(),
+            self.signature.clone(),
+        )
+    }
+}
+
+impl Serialize for KeyPackage {
+    const MAX_SIZE: usize = sum(&[KeyPackageTbs::MAX_SIZE, Signature::MAX_SIZE]);
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        self.to_be_signed.serialize(writer)?;
+        self.signature.serialize(writer)?;
+        Ok(())
+    }
+}
+
+impl<'a> Deserialize<'a> for KeyPackageView<'a> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        let mut sub_reader = reader.fork();
+
+        let to_be_signed = KeyPackageTbsView::deserialize(&mut sub_reader)?;
+        let to_be_signed_raw = reader.read_ref(sub_reader.position())?;
+        let signature = SignatureView::deserialize(reader)?;
+
+        Ok(Self {
+            to_be_signed,
+            to_be_signed_raw,
+            signature,
+        })
+    }
+}
+
+impl AsView for KeyPackage {
+    type View<'a> = KeyPackageView<'a>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        Self::View {
+            to_be_signed: self.to_be_signed.as_view(),
+            to_be_signed_raw: &self.to_be_signed_raw,
+            signature: self.signature.as_view(),
+        }
+    }
+}
+
+impl<'a> ToOwned for KeyPackageView<'a> {
+    type Owned = KeyPackage;
+
+    fn to_owned(&self) -> Self::Owned {
+        Self::Owned {
+            to_be_signed: self.to_be_signed.to_owned(),
+            to_be_signed_raw: self.to_be_signed_raw.try_into().unwrap(),
+            signature: self.signature.to_owned(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -316,7 +440,6 @@ mod test {
         assert!(ver);
     }
 
-    /*
     #[test]
     fn key_package_sign_verify() {
         let rng = &mut rand::thread_rng();
@@ -327,14 +450,13 @@ mod test {
         let (_key_package_priv, key_package) =
             KeyPackage::new(rng, signature_priv, signature_key, credential).unwrap();
 
-        let mut storage: Vec<u8, { KeyPackage::MAX_SIZE }> = Vec::new();
-        key_package.write_to(&mut storage).unwrap();
+        let mut storage = make_storage!(KeyPackage);
+        key_package.serialize(&mut storage).unwrap();
 
         let mut reader = SliceReader::new(&storage);
-        let key_package_view = KeyPackageView::read_from(&mut reader).unwrap();
+        let key_package_view = KeyPackageView::deserialize(&mut reader).unwrap();
 
         let ver = key_package_view.verify().unwrap();
         assert!(ver);
     }
-    */
 }
