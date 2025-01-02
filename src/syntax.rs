@@ -267,34 +267,16 @@ impl<'a> ToOwned for Varint {
     }
 }
 
-// XXX(RLB): Note that in order to use these in newtypes / enums / structs, you will need to alias
-// the view type with fixed type and length, so that the only free parameter is the lifetime.
+// XXX(RLB): Note that in order to use vectors in newtypes / enums / structs, you will need to
+// alias the view type with fixed type and length, so that the only free parameter is the lifetime.
 
-#[derive(Clone, Default, Debug, PartialEq)]
-pub struct Vector<T: Serialize, const N: usize>(pub Vec<T, N>);
-
-impl<T: Serialize, const N: usize> From<Vec<T, N>> for Vector<T, N> {
-    fn from(val: Vec<T, N>) -> Self {
-        Self(val)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct VectorView<'a, V: Deserialize<'a>, const N: usize>(pub Vec<V, N>, PhantomLifetime<'a>);
-
-impl<'a, V: Deserialize<'a>, const N: usize> From<Vec<V, N>> for VectorView<'a, V, N> {
-    fn from(val: Vec<V, N>) -> Self {
-        Self(val, PhantomData)
-    }
-}
-
-impl<T: Serialize, const N: usize> Serialize for Vector<T, N> {
+impl<T: Serialize, const N: usize> Serialize for Vec<T, N> {
     const MAX_SIZE: usize = Varint::size(N * T::MAX_SIZE) + N * T::MAX_SIZE;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
         // First, serialize everything to a writer that just counts how much would be serialized
         let mut counter = CountWriter::default();
-        for val in self.0.iter() {
+        for val in self.iter() {
             val.serialize(&mut counter)?;
         }
 
@@ -302,14 +284,14 @@ impl<T: Serialize, const N: usize> Serialize for Vector<T, N> {
         Varint(counter.len()).serialize(writer)?;
 
         // Then serialize the contents for real
-        for val in self.0.iter() {
+        for val in self.iter() {
             val.serialize(writer)?;
         }
         Ok(())
     }
 }
 
-impl<'a, V: Deserialize<'a>, const N: usize> Deserialize<'a> for VectorView<'a, V, N> {
+impl<'a, V: Deserialize<'a>, const N: usize> Deserialize<'a> for Vec<V, N> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
         let len = Varint::deserialize(reader)?;
 
@@ -320,26 +302,26 @@ impl<'a, V: Deserialize<'a>, const N: usize> Deserialize<'a> for VectorView<'a, 
                 .map_err(|_| Error("Too many items"))?;
         }
 
-        Ok(Self(vec, PhantomData))
+        Ok(vec)
     }
 }
 
-impl<T: Serialize + AsView, const N: usize> AsView for Vector<T, N> {
+impl<T: Serialize + AsView, const N: usize> AsView for Vec<T, N> {
     type View<'a>
-        = VectorView<'a, T::View<'a>, N>
+        = Vec<T::View<'a>, N>
     where
         T: 'a;
 
     fn as_view<'a>(&'a self) -> Self::View<'a> {
-        VectorView(self.0.iter().map(|t| t.as_view()).collect(), PhantomData)
+        self.iter().map(|t| t.as_view()).collect()
     }
 }
 
-impl<'a, V: Deserialize<'a> + ToOwned, const N: usize> ToOwned for VectorView<'a, V, N> {
-    type Owned = Vector<V::Owned, N>;
+impl<'a, V: Deserialize<'a> + ToOwned, const N: usize> ToOwned for Vec<V, N> {
+    type Owned = Vec<V::Owned, N>;
 
     fn to_owned(&self) -> Self::Owned {
-        Vector(self.0.iter().map(|v| v.to_owned()).collect())
+        self.iter().map(|v| v.to_owned()).collect()
     }
 }
 
@@ -443,6 +425,35 @@ pub const fn max(array: &[usize]) -> usize {
 }
 
 #[macro_export]
+macro_rules! mls_newtype_opaque {
+    ($owned_type:ident + $view_type:ident, 
+     $inner_owned_type:ident + $inner_view_type:ident, 
+     $size:expr) => {
+        type $inner_owned_type = Opaque<{ $size }>;
+        type $inner_view_type<'a> = OpaqueView<'a, { $size }>;
+
+        mls_newtype! {
+            $owned_type + $view_type => $inner_owned_type + $inner_view_type
+        }
+
+        impl TryFrom<&[u8]> for $owned_type {
+            type Error = Error;
+
+            fn try_from(val: &[u8]) -> Result<Self> {
+                let vec = Vec::try_from(val).map_err(|_| Error("Too many values"))?;
+                Ok(Self::from(Opaque::from(vec)))
+            }
+        }
+
+        impl AsRef<[u8]> for $owned_type {
+            fn as_ref(&self) -> &[u8] {
+                self.0.as_ref()
+            }
+        }
+    };
+}
+
+#[macro_export]
 macro_rules! mls_newtype {
     ($owned_type:ident + $view_type:ident => $inner_owned_type:ident + $inner_view_type:ident) => {
         #[derive(Clone, Default, Debug, PartialEq)]
@@ -506,35 +517,6 @@ macro_rules! mls_newtype {
 
             fn to_owned(&self) -> Self::Owned {
                 $owned_type::from(self.0.to_owned())
-            }
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! mls_newtype_opaque {
-    ($owned_type:ident + $view_type:ident, 
-     $inner_owned_type:ident + $inner_view_type:ident, 
-     $size:expr) => {
-        type $inner_owned_type = Opaque<{ $size }>;
-        type $inner_view_type<'a> = OpaqueView<'a, { $size }>;
-
-        mls_newtype! {
-            $owned_type + $view_type => $inner_owned_type + $inner_view_type
-        }
-
-        impl TryFrom<&[u8]> for $owned_type {
-            type Error = Error;
-
-            fn try_from(val: &[u8]) -> Result<Self> {
-                let vec = Vec::try_from(val).map_err(|_| Error("Too many values"))?;
-                Ok(Self::from(Opaque::from(vec)))
-            }
-        }
-
-        impl AsRef<[u8]> for $owned_type {
-            fn as_ref(&self) -> &[u8] {
-                self.0.as_ref()
             }
         }
     };
@@ -736,17 +718,17 @@ mod test {
     #[test]
     fn vector() {
         const N: usize = 5;
-        let storage = make_storage!(Vector<U32, N>);
+        let storage = make_storage!(Vec<U32, N>);
 
         let vals = [0xa0a0a0a0_u32; N];
         let owned: Vec<U32, N> = vals.iter().cloned().map(U32::from).collect();
-        let views: Vec<U32View, N> = vals.iter().cloned().map(U32View::from).collect();
+        let view: Vec<U32View, N> = vals.iter().cloned().map(U32View::from).collect();
 
         let serialized = &hex!("14a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0");
 
         test_serde(
-            &Vector::from(owned),
-            &VectorView::from(views),
+            &owned,
+            &view,
             serialized,
             storage,
         );

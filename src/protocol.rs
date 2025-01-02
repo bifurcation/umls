@@ -47,24 +47,20 @@ mls_newtype! { ExtensionType + ExtensionTypeView => U16 + U16View }
 mls_newtype! { ProposalType + ProposalTypeView => U16 + U16View }
 mls_newtype! { CredentialType + CredentialTypeView => U16 + U16View }
 
-type ProtocolVersionList = Vector<ProtocolVersion, { consts::MAX_PROTOCOL_VERSIONS }>;
-type ProtocolVersionListView<'a> =
-    VectorView<'a, ProtocolVersionView<'a>, { consts::MAX_PROTOCOL_VERSIONS }>;
+type ProtocolVersionList = Vec<ProtocolVersion, { consts::MAX_PROTOCOL_VERSIONS }>;
+type ProtocolVersionListView<'a> = Vec<ProtocolVersionView<'a>, { consts::MAX_PROTOCOL_VERSIONS }>;
 
-type CipherSuiteList = Vector<CipherSuite, { consts::MAX_CIPHER_SUITES }>;
-type CipherSuiteListView<'a> = VectorView<'a, CipherSuiteView<'a>, { consts::MAX_CIPHER_SUITES }>;
+type CipherSuiteList = Vec<CipherSuite, { consts::MAX_CIPHER_SUITES }>;
+type CipherSuiteListView<'a> = Vec<CipherSuiteView<'a>, { consts::MAX_CIPHER_SUITES }>;
 
-type ExtensionTypeList = Vector<ExtensionType, { consts::MAX_EXTENSION_TYPES }>;
-type ExtensionTypeListView<'a> =
-    VectorView<'a, ExtensionTypeView<'a>, { consts::MAX_EXTENSION_TYPES }>;
+type ExtensionTypeList = Vec<ExtensionType, { consts::MAX_EXTENSION_TYPES }>;
+type ExtensionTypeListView<'a> = Vec<ExtensionTypeView<'a>, { consts::MAX_EXTENSION_TYPES }>;
 
-type ProposalTypeList = Vector<ProposalType, { consts::MAX_PROPOSAL_TYPES }>;
-type ProposalTypeListView<'a> =
-    VectorView<'a, ProposalTypeView<'a>, { consts::MAX_PROPOSAL_TYPES }>;
+type ProposalTypeList = Vec<ProposalType, { consts::MAX_PROPOSAL_TYPES }>;
+type ProposalTypeListView<'a> = Vec<ProposalTypeView<'a>, { consts::MAX_PROPOSAL_TYPES }>;
 
-type CredentialTypeList = Vector<CredentialType, { consts::MAX_CREDENTIAL_TYPES }>;
-type CredentialTypeListView<'a> =
-    VectorView<'a, CredentialTypeView<'a>, { consts::MAX_CREDENTIAL_TYPES }>;
+type CredentialTypeList = Vec<CredentialType, { consts::MAX_CREDENTIAL_TYPES }>;
+type CredentialTypeListView<'a> = Vec<CredentialTypeView<'a>, { consts::MAX_CREDENTIAL_TYPES }>;
 
 mls_struct! {
     Capabilities + CapabilitiesView,
@@ -112,8 +108,8 @@ mls_struct! {
     extension_data: ExtensionData + ExtensionDataView,
 }
 
-type ExtensionListData = Vector<Extension, { consts::MAX_EXTENSIONS }>;
-type ExtensionListDataView<'a> = VectorView<'a, ExtensionView<'a>, { consts::MAX_EXTENSIONS }>;
+type ExtensionListData = Vec<Extension, { consts::MAX_EXTENSIONS }>;
+type ExtensionListDataView<'a> = Vec<ExtensionView<'a>, { consts::MAX_EXTENSIONS }>;
 
 mls_newtype! { ExtensionList + ExtensionListView => ExtensionListData + ExtensionListDataView }
 
@@ -162,17 +158,14 @@ impl LeafNode {
         let mut capabilities = Capabilities::default();
         capabilities
             .versions
-            .0
             .push(ProtocolVersion::from(U16::from(consts::SUPPORTED_VERSION)))
             .map_err(|_| Error("Too many items"))?;
         capabilities
             .cipher_suites
-            .0
             .push(CipherSuite::from(U16::from(CIPHER_SUITE)))
             .map_err(|_| Error("Too many items"))?;
         capabilities
             .credentials
-            .0
             .push(CredentialType::from(U16::from(
                 consts::SUPPORTED_CREDENTIAL_TYPE,
             )))
