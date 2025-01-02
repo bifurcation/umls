@@ -56,6 +56,23 @@ impl<'a> Deserialize<'a> for NilView<'a> {
 
 macro_rules! primitive_int_serde {
     ($int:ty => $value_type:ident + $view_type:ident) => {
+        impl Serialize for $int {
+            const MAX_SIZE: usize = core::mem::size_of::<$int>();
+
+            fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                writer.write(&self.to_be_bytes())
+            }
+        }
+
+        impl<'a> Deserialize<'a> for $int {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                const N: usize = <$int>::MAX_SIZE;
+                let slice = reader.read_ref(N)?;
+                let array: [u8; N] = slice.try_into().map_err(|_| Error("Unknown error"))?;
+                Ok(<$int>::from_be_bytes(array))
+            }
+        }
+
         #[derive(Default, Clone, Copy, PartialEq, Debug)]
         struct $value_type($int);
 
@@ -86,7 +103,7 @@ macro_rules! primitive_int_serde {
             const MAX_SIZE: usize = core::mem::size_of::<$int>();
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
-                writer.write(&self.0.to_be_bytes())
+                self.0.serialize(writer)
             }
         }
 
@@ -106,11 +123,7 @@ macro_rules! primitive_int_serde {
 
         impl<'a> Deserialize<'a> for $view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-                const N: usize = <$value_type>::MAX_SIZE;
-                let slice = reader.read_ref(N)?;
-                let array: [u8; N] = slice.try_into().map_err(|_| Error("Unknown error"))?;
-                let val = <$int>::from_be_bytes(array);
-                Ok(Self::from(val))
+                Ok(Self::from(<$int>::deserialize(reader)?))
             }
         }
     };
@@ -288,6 +301,154 @@ impl<'a, const N: usize> Deserialize<'a> for OpaqueView<'a, N> {
     }
 }
 
+pub const fn sum(array: &[usize]) -> usize {
+    let mut i = 0;
+    let mut sum = 0;
+    while i < array.len() {
+        sum += array[i];
+        i += 1;
+    }
+    sum
+}
+
+pub const fn max(array: &[usize]) -> usize {
+    let mut i = 0;
+    let mut max = 0;
+    while i < array.len() {
+        if array[i] > max {
+            max = array[i];
+        }
+        i += 1
+    }
+    max
+}
+
+#[macro_export]
+macro_rules! mls_newtype {
+    ($owned_type:ident + $view_type:ident => $inner_owned_type:ident + $inner_view_type:ident) => {
+        #[derive(Clone, Default, Debug, PartialEq)]
+        struct $owned_type($inner_owned_type);
+
+        impl From<$inner_owned_type> for $owned_type {
+            fn from(val: $inner_owned_type) -> Self {
+                Self(val)
+            }
+        }
+
+        impl Deref for $owned_type {
+            type Target = $inner_owned_type;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        struct $view_type<'a>($inner_view_type<'a>);
+
+        impl<'a> From<$inner_view_type<'a>> for $view_type<'a> {
+            fn from(val: $inner_view_type<'a>) -> Self {
+                Self(val)
+            }
+        }
+
+        impl<'a> Deref for $view_type<'a> {
+            type Target = $inner_view_type<'a>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl Serialize for $owned_type {
+            const MAX_SIZE: usize = $inner_owned_type::MAX_SIZE;
+
+            fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                self.0.serialize(writer)
+            }
+        }
+
+        impl<'a> Deserialize<'a> for $view_type<'a> {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                Ok(Self($inner_view_type::deserialize(reader)?))
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! mls_struct {
+    ($owned_type:ident + $view_type:ident, $($field_name:ident: $field_type:ident + $field_view_type:ident,)*) => {
+        #[derive(Clone, Default, Debug, PartialEq)]
+        struct $owned_type {
+            $($field_name: $field_type,)*
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        struct $view_type<'a> {
+            $($field_name: $field_view_type<'a>,)*
+        }
+
+        impl Serialize for $owned_type {
+            const MAX_SIZE: usize = sum(&[$($field_type::MAX_SIZE, )*]);
+
+            fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                $(self.$field_name.serialize(writer)?;)*
+                Ok(())
+            }
+        }
+
+        impl<'a> Deserialize<'a> for $view_type<'a> {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                Ok(Self{
+                    $($field_name: $field_view_type::deserialize(reader)?,)*
+                })
+            }
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! mls_enum {
+    ($disc_type:ident => $owned_type:ident + $view_type:ident, $($variant_disc:expr => $variant_name:ident($variant_type:ident + $variant_view_type:ident),)*) => {
+        #[derive(Clone, Debug, PartialEq)]
+        enum $owned_type {
+            $($variant_name($variant_type),)*
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        enum $view_type<'a> {
+            $($variant_name($variant_view_type<'a>),)*
+        }
+
+        impl Serialize for $owned_type {
+            const MAX_SIZE: usize = $disc_type::MAX_SIZE + max(&[$($variant_type::MAX_SIZE, )*]);
+
+            fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                match self {
+                    $(
+                    Self::$variant_name(x) => {
+                        $disc_type::serialize(&$variant_disc, writer)?;
+                        x.serialize(writer)
+                    }
+                    )*
+                }
+            }
+        }
+
+        impl<'a> Deserialize<'a> for $view_type<'a> {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                let disc = $disc_type::deserialize(reader)?;
+                match disc {
+                    $($variant_disc => Ok(Self::$variant_name($variant_view_type::deserialize(reader)?)),)*
+                    _ => Err(Error("Invalid encoding")),
+                }
+            }
+        }
+
+    };
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -405,6 +566,91 @@ mod test {
             OpaqueView::<N>::try_from(view).unwrap(),
             serialized,
             storage,
+        );
+    }
+
+    mls_newtype! { CipherSuite + CipherSuiteView => U16 + U16View }
+
+    #[test]
+    fn mls_newtype() {
+        let storage = make_storage!(CipherSuite);
+        let suite = 0x0123;
+
+        test_serde(
+            CipherSuite::from(U16::from(suite)),
+            CipherSuiteView::from(U16View::from(suite)),
+            &hex!("0123"),
+            storage,
+        );
+    }
+
+    type TestOpaque = Opaque<5>;
+    type TestOpaqueView<'a> = OpaqueView<'a, 5>;
+
+    mls_struct! {
+        TestStruct + TestStructView,
+        field1: U32 + U32View,
+        field2: U8 + U8View,
+        field3: TestOpaque + TestOpaqueView,
+    }
+
+    #[test]
+    fn mls_struct() {
+        let storage = make_storage!(TestStruct);
+
+        let raw1 = 0x01234567;
+        let raw2 = 0xff;
+        let raw3 = [1, 2, 3, 4, 5];
+
+        let owned = TestStruct {
+            field1: U32::from(raw1),
+            field2: U8::from(raw2),
+            field3: TestOpaque::from(Vec::from_slice(&raw3).unwrap()),
+        };
+
+        let view = TestStructView {
+            field1: U32View::from(raw1),
+            field2: U8View::from(raw2),
+            field3: TestOpaqueView::try_from(&raw3[..]).unwrap(),
+        };
+
+        let serialized = &hex!("01234567ff050102030405");
+
+        test_serde(owned, view, serialized, storage);
+    }
+
+    mls_enum! {
+        u8 => TestEnum + TestEnumView,
+        1 => A(U32 + U32View),
+        2 => B(U8 + U8View),
+        3 => C(TestOpaque + TestOpaqueView),
+    }
+
+    #[test]
+    fn mls_enum() {
+        let raw = 0x01234567;
+        test_serde(
+            TestEnum::A(raw.into()),
+            TestEnumView::A(raw.into()),
+            &hex!("0101234567"),
+            make_storage!(TestEnum),
+        );
+
+        let raw = 0xff;
+        test_serde(
+            TestEnum::B(raw.into()),
+            TestEnumView::B(raw.into()),
+            &hex!("02ff"),
+            make_storage!(TestEnum),
+        );
+
+        let raw = [1_u8, 2, 3, 4, 5];
+        let raw = &raw[..];
+        test_serde(
+            TestEnum::C(Vec::try_from(raw).unwrap().into()),
+            TestEnumView::C(raw.try_into().unwrap()),
+            &hex!("03050102030405"),
+            make_storage!(TestEnum),
         );
     }
 }
