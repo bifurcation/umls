@@ -100,20 +100,44 @@ pub fn generate_sig(
     Ok((signature_priv, signature_key))
 }
 
+/*
+struct {
+    opaque label<V>;
+    opaque content<V>;
+} SignContent;
+*/
+fn signature_digest(message: &[u8], label: &[u8]) -> Result<HashOutput> {
+    let mut h = Hash::new();
+
+    Varint(label.len()).serialize(&mut h)?;
+    h.write(label)?;
+
+    Varint(message.len()).serialize(&mut h)?;
+    h.write(message)?;
+
+    Ok(h.finalize())
+}
+
 // TODO(RLB) SignWithLabel
-pub fn sign(message: &[u8], signature_priv: SignaturePrivateKeyView) -> Result<Signature> {
+pub fn sign_with_label(
+    message: &[u8],
+    label: &[u8],
+    signature_priv: SignaturePrivateKeyView,
+) -> Result<Signature> {
     let priv_bytes = signature_priv.as_ref().try_into().unwrap();
     let raw_priv = SigningKey::from_keypair_bytes(priv_bytes).unwrap();
 
-    let raw_sig = raw_priv.sign(message.as_ref());
+    let digest = signature_digest(message, label)?;
+    let raw_sig = raw_priv.sign(digest.as_ref());
     let signature = Signature::try_from(raw_sig.to_bytes().as_slice()).unwrap();
 
     Ok(signature)
 }
 
 // TODO(RLB) VerifyWithLabel
-pub fn verify(
+pub fn verify_with_label(
     message: &[u8],
+    label: &[u8],
     signature_key: SignaturePublicKeyView,
     signature: SignatureView,
 ) -> Result<bool> {
@@ -123,7 +147,8 @@ pub fn verify(
     let raw_key = VerifyingKey::from_bytes(key_bytes).unwrap();
     let raw_sig = ed25519_dalek::Signature::try_from(sig_bytes).unwrap();
 
-    let ver = raw_key.verify(message, &raw_sig).is_ok();
+    let digest = signature_digest(message, label)?;
+    let ver = raw_key.verify(digest.as_ref(), &raw_sig).is_ok();
     Ok(ver)
 }
 

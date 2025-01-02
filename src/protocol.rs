@@ -149,6 +149,8 @@ struct LeafNodeView<'a> {
 }
 
 impl LeafNode {
+    const SIGNATURE_LABEL: &[u8] = b"LeafNodeTBS";
+
     fn new(
         rng: &mut impl CryptoRngCore,
         leaf_node_source: LeafNodeSource,
@@ -191,8 +193,11 @@ impl LeafNode {
         to_be_signed.serialize(&mut to_be_signed_raw)?;
 
         // Populate the signature
-        // TODO(RLB) SignWithLabel
-        let signature = crypto::sign(&to_be_signed_raw, signature_priv.as_view())?;
+        let signature = crypto::sign_with_label(
+            &to_be_signed_raw,
+            Self::SIGNATURE_LABEL,
+            signature_priv.as_view(),
+        )?;
 
         let leaf_node_priv = LeafNodePriv {
             encryption_priv,
@@ -209,8 +214,9 @@ impl LeafNode {
 
 impl<'a> LeafNodeView<'a> {
     fn verify(&self) -> Result<bool> {
-        crypto::verify(
+        crypto::verify_with_label(
             self.to_be_signed_raw.as_ref(),
+            LeafNode::SIGNATURE_LABEL,
             self.to_be_signed.signature_key.clone(),
             self.signature.clone(),
         )
@@ -298,6 +304,8 @@ struct KeyPackageView<'a> {
 }
 
 impl KeyPackage {
+    const SIGNATURE_LABEL: &[u8] = b"KeyPackageTBS";
+
     fn new(
         rng: &mut impl CryptoRngCore,
         signature_priv: SignaturePrivateKey,
@@ -328,8 +336,11 @@ impl KeyPackage {
         to_be_signed.serialize(&mut to_be_signed_raw)?;
 
         // Populate the signature
-        // TODO(RLB) SignWithLabel
-        let signature = crypto::sign(&to_be_signed_raw, signature_priv.as_view())?;
+        let signature = crypto::sign_with_label(
+            &to_be_signed_raw,
+            Self::SIGNATURE_LABEL,
+            signature_priv.as_view(),
+        )?;
 
         let key_package_priv = KeyPackagePriv {
             init_priv,
@@ -346,8 +357,9 @@ impl KeyPackage {
 
 impl<'a> KeyPackageView<'a> {
     fn verify(&self) -> Result<bool> {
-        crypto::verify(
+        crypto::verify_with_label(
             self.to_be_signed_raw.as_ref(),
+            KeyPackage::SIGNATURE_LABEL,
             self.to_be_signed
                 .leaf_node
                 .to_be_signed

@@ -181,7 +181,7 @@ primitive_int_serde!(u32 => U32 + U32View);
 primitive_int_serde!(u64 => U64 + U64View);
 
 #[derive(Default, Copy, Clone, PartialEq, Debug)]
-struct Varint(usize);
+pub struct Varint(pub usize);
 
 impl Varint {
     const MAX_1: usize = 1 << 6;
