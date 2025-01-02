@@ -28,6 +28,20 @@ pub trait Deserialize<'a>: Sized {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self>;
 }
 
+pub trait AsView {
+    type View<'a>: Deserialize<'a>
+    where
+        Self: 'a;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a>;
+}
+
+pub trait ToOwned {
+    type Owned: Serialize;
+
+    fn to_owned(&self) -> Self::Owned;
+}
+
 // XXX(RLB) Note that these types can only be included in newtypes / structs / enums if they are
 // first wrapped using the `primitive_newtype!` enum.  This is because the compunding macros assume
 // that the "view" type (the one that implements Deserialize) has a lifetime parameter.
@@ -51,6 +65,22 @@ impl Serialize for Nil {
 impl<'a> Deserialize<'a> for NilView<'a> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
         Ok(NilView(&()))
+    }
+}
+
+impl AsView for Nil {
+    type View<'a> = NilView<'a>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        NilView(&())
+    }
+}
+
+impl<'a> ToOwned for NilView<'a> {
+    type Owned = Nil;
+
+    fn to_owned(&self) -> Self::Owned {
+        Nil
     }
 }
 
@@ -124,6 +154,22 @@ macro_rules! primitive_int_serde {
         impl<'a> Deserialize<'a> for $view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
                 Ok(Self::from(<$int>::deserialize(reader)?))
+            }
+        }
+
+        impl AsView for $value_type {
+            type View<'a> = $view_type<'a>;
+
+            fn as_view<'a>(&'a self) -> Self::View<'a> {
+                $view_type::from(self.0)
+            }
+        }
+
+        impl<'a> ToOwned for $view_type<'a> {
+            type Owned = $value_type;
+
+            fn to_owned(&self) -> Self::Owned {
+                $value_type::from(self.0)
             }
         }
     };
@@ -205,6 +251,22 @@ impl<'a> Deserialize<'a> for Varint {
     }
 }
 
+impl AsView for Varint {
+    type View<'a> = Varint;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        *self
+    }
+}
+
+impl<'a> ToOwned for Varint {
+    type Owned = Varint;
+
+    fn to_owned(&self) -> Self::Owned {
+        *self
+    }
+}
+
 // XXX(RLB): Note that in order to use these in newtypes / enums / structs, you will need to alias
 // the view type with fixed type and length, so that the only free parameter is the lifetime.
 
@@ -262,6 +324,25 @@ impl<'a, V: Deserialize<'a>, const N: usize> Deserialize<'a> for VectorView<'a, 
     }
 }
 
+impl<T: Serialize + AsView, const N: usize> AsView for Vector<T, N> {
+    type View<'a>
+        = VectorView<'a, T::View<'a>, N>
+    where
+        T: 'a;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        VectorView(self.0.iter().map(|t| t.as_view()).collect(), PhantomData)
+    }
+}
+
+impl<'a, V: Deserialize<'a> + ToOwned, const N: usize> ToOwned for VectorView<'a, V, N> {
+    type Owned = Vector<V::Owned, N>;
+
+    fn to_owned(&self) -> Self::Owned {
+        Vector(self.0.iter().map(|v| v.to_owned()).collect())
+    }
+}
+
 #[derive(Clone, Default, Debug, PartialEq)]
 struct Opaque<const N: usize>(pub Vec<u8, N>);
 
@@ -298,6 +379,23 @@ impl<'a, const N: usize> Deserialize<'a> for OpaqueView<'a, N> {
         let len = Varint::deserialize(reader)?;
         let content = reader.read_ref(len.0)?;
         Self::try_from(content)
+    }
+}
+
+impl<const N: usize> AsView for Opaque<N> {
+    type View<'a> = OpaqueView<'a, N>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        OpaqueView(&self.0)
+    }
+}
+
+impl<'a, const N: usize> ToOwned for OpaqueView<'a, N> {
+    type Owned = Opaque<N>;
+
+    fn to_owned(&self) -> Self::Owned {
+        // Unwrap is safe here because OpaqueView<N> can't be constructed with more than N elements
+        Opaque(self.0.try_into().unwrap())
     }
 }
 
@@ -373,6 +471,22 @@ macro_rules! mls_newtype {
                 Ok(Self($inner_view_type::deserialize(reader)?))
             }
         }
+
+        impl AsView for $owned_type {
+            type View<'a> = $view_type<'a>;
+
+            fn as_view<'a>(&'a self) -> Self::View<'a> {
+                $view_type::from(self.0.as_view())
+            }
+        }
+
+        impl<'a> ToOwned for $view_type<'a> {
+            type Owned = $owned_type;
+
+            fn to_owned(&self) -> Self::Owned {
+                $owned_type::from(self.0.to_owned())
+            }
+        }
     };
 }
 
@@ -403,6 +517,26 @@ macro_rules! mls_struct {
                 Ok(Self{
                     $($field_name: $field_view_type::deserialize(reader)?,)*
                 })
+            }
+        }
+
+        impl AsView for $owned_type {
+            type View<'a> = $view_type<'a>;
+
+            fn as_view<'a>(&'a self) -> Self::View<'a> {
+                Self::View {
+                    $($field_name: self.$field_name.as_view(),)*
+                }
+            }
+        }
+
+        impl<'a> ToOwned for $view_type<'a> {
+            type Owned = $owned_type;
+
+            fn to_owned(&self) -> Self::Owned {
+                Self::Owned {
+                    $($field_name: self.$field_name.to_owned(),)*
+                }
             }
         }
     }
@@ -446,6 +580,25 @@ macro_rules! mls_enum {
             }
         }
 
+        impl AsView for $owned_type {
+            type View<'a> = $view_type<'a>;
+
+            fn as_view<'a>(&'a self) -> Self::View<'a> {
+                match self {
+                    $(Self::$variant_name(x) => Self::View::$variant_name(x.as_view()),)*
+                }
+            }
+        }
+
+        impl<'a> ToOwned for $view_type<'a> {
+            type Owned = $owned_type;
+
+            fn to_owned(&self) -> Self::Owned {
+                match self {
+                    $(Self::$variant_name(x) => Self::Owned::$variant_name(x.to_owned()),)*
+                }
+            }
+        }
     };
 }
 
@@ -458,13 +611,13 @@ mod test {
     use hex_literal::hex;
 
     fn test_serde<'a, T, V, const N: usize>(
-        val: T,
-        view: V,
+        val: &'a T,
+        view: &'a V,
         bytes: &'a [u8],
         mut storage: Vec<u8, N>,
     ) where
-        T: Serialize,
-        V: Deserialize<'a> + PartialEq + Debug,
+        T: Serialize + AsView<View<'a> = V> + PartialEq + Debug + 'a,
+        V: Deserialize<'a> + ToOwned<Owned = T> + PartialEq + Debug,
     {
         // Serialization
         val.serialize(&mut storage).unwrap();
@@ -473,37 +626,41 @@ mod test {
         // Deserialization
         let mut reader = SliceReader::new(bytes);
         let deserialized = V::deserialize(&mut reader).unwrap();
-        assert_eq!(view, deserialized);
+        assert_eq!(&deserialized, view);
+
+        // AsView + ToOwned
+        assert_eq!(val.as_view(), *view);
+        assert_eq!(view.to_owned(), *val);
     }
 
     #[test]
     fn primitives() {
         let storage = make_storage!(Nil);
-        test_serde(Nil, NilView(&()), &hex!(""), storage);
+        test_serde(&Nil, &NilView(&()), &hex!(""), storage);
 
         let storage = make_storage!(U8);
-        test_serde(U8::from(0xa0), U8View::from(0xa0), &hex!("a0"), storage);
+        test_serde(&U8::from(0xa0), &U8View::from(0xa0), &hex!("a0"), storage);
 
         let storage = make_storage!(U16);
         test_serde(
-            U16::from(0xa0a1),
-            U16View::from(0xa0a1),
+            &U16::from(0xa0a1),
+            &U16View::from(0xa0a1),
             &hex!("a0a1"),
             storage,
         );
 
         let storage = make_storage!(U32);
         test_serde(
-            U32::from(0xa0a1a2a3),
-            U32View::from(0xa0a1a2a3),
+            &U32::from(0xa0a1a2a3),
+            &U32View::from(0xa0a1a2a3),
             &hex!("a0a1a2a3"),
             storage,
         );
 
         let storage = make_storage!(U64);
         test_serde(
-            U64::from(0xa0a1a2a3a4a5a6a7),
-            U64View::from(0xa0a1a2a3a4a5a6a7),
+            &U64::from(0xa0a1a2a3a4a5a6a7),
+            &U64View::from(0xa0a1a2a3a4a5a6a7),
             &hex!("a0a1a2a3a4a5a6a7"),
             storage,
         );
@@ -512,15 +669,15 @@ mod test {
     #[test]
     fn varint() {
         let storage = make_storage!(Varint);
-        test_serde(Varint(0x3f), Varint(0x3f), &hex!("3f"), storage);
+        test_serde(&Varint(0x3f), &Varint(0x3f), &hex!("3f"), storage);
 
         let storage = make_storage!(Varint);
-        test_serde(Varint(0x3fff), Varint(0x3fff), &hex!("7fff"), storage);
+        test_serde(&Varint(0x3fff), &Varint(0x3fff), &hex!("7fff"), storage);
 
         let storage = make_storage!(Varint);
         test_serde(
-            Varint(0x3fffffff),
-            Varint(0x3fffffff),
+            &Varint(0x3fffffff),
+            &Varint(0x3fffffff),
             &hex!("bfffffff"),
             storage,
         );
@@ -538,8 +695,8 @@ mod test {
         let serialized = &hex!("14a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0");
 
         test_serde(
-            Vector::from(owned),
-            VectorView::from(views),
+            &Vector::from(owned),
+            &VectorView::from(views),
             serialized,
             storage,
         );
@@ -562,8 +719,8 @@ mod test {
         );
 
         test_serde(
-            Opaque::<N>::from(owned),
-            OpaqueView::<N>::try_from(view).unwrap(),
+            &Opaque::<N>::from(owned),
+            &OpaqueView::<N>::try_from(view).unwrap(),
             serialized,
             storage,
         );
@@ -577,8 +734,8 @@ mod test {
         let suite = 0x0123;
 
         test_serde(
-            CipherSuite::from(U16::from(suite)),
-            CipherSuiteView::from(U16View::from(suite)),
+            &CipherSuite::from(U16::from(suite)),
+            &CipherSuiteView::from(U16View::from(suite)),
             &hex!("0123"),
             storage,
         );
@@ -616,7 +773,7 @@ mod test {
 
         let serialized = &hex!("01234567ff050102030405");
 
-        test_serde(owned, view, serialized, storage);
+        test_serde(&owned, &view, serialized, storage);
     }
 
     mls_enum! {
@@ -630,16 +787,16 @@ mod test {
     fn mls_enum() {
         let raw = 0x01234567;
         test_serde(
-            TestEnum::A(raw.into()),
-            TestEnumView::A(raw.into()),
+            &TestEnum::A(raw.into()),
+            &TestEnumView::A(raw.into()),
             &hex!("0101234567"),
             make_storage!(TestEnum),
         );
 
         let raw = 0xff;
         test_serde(
-            TestEnum::B(raw.into()),
-            TestEnumView::B(raw.into()),
+            &TestEnum::B(raw.into()),
+            &TestEnumView::B(raw.into()),
             &hex!("02ff"),
             make_storage!(TestEnum),
         );
@@ -647,8 +804,8 @@ mod test {
         let raw = [1_u8, 2, 3, 4, 5];
         let raw = &raw[..];
         test_serde(
-            TestEnum::C(Vec::try_from(raw).unwrap().into()),
-            TestEnumView::C(raw.try_into().unwrap()),
+            &TestEnum::C(Vec::try_from(raw).unwrap().into()),
+            &TestEnumView::C(raw.try_into().unwrap()),
             &hex!("03050102030405"),
             make_storage!(TestEnum),
         );
