@@ -352,6 +352,21 @@ impl<const N: usize> From<Vec<u8, N>> for Opaque<N> {
     }
 }
 
+impl<const N: usize> TryFrom<&[u8]> for Opaque<N> {
+    type Error = Error;
+
+    fn try_from(val: &[u8]) -> Result<Self> {
+                let vec = Vec::try_from(val).map_err(|_| Error("Too many values"))?;
+                Ok(Self::from(vec))
+    }
+}
+
+impl<const N: usize> AsRef<[u8]> for Opaque<N> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct OpaqueView<'a, const N: usize>(pub &'a [u8]);
 
@@ -362,6 +377,12 @@ impl<'a, const N: usize> TryFrom<&'a [u8]> for OpaqueView<'a, N> {
         (val.len() <= N)
             .then_some(Self(val))
             .ok_or(Error("Too many items"))
+    }
+}
+
+impl<'a, const N: usize> AsRef<[u8]> for OpaqueView<'a, N> {
+    fn as_ref(&self) -> &[u8] {
+        self.0
     }
 }
 
@@ -497,8 +518,24 @@ macro_rules! mls_newtype_opaque {
      $size:expr) => {
         type $inner_owned_type = Opaque<{ $size }>;
         type $inner_view_type<'a> = OpaqueView<'a, { $size }>;
+
         mls_newtype! {
             $owned_type + $view_type => $inner_owned_type + $inner_view_type
+        }
+
+        impl TryFrom<&[u8]> for $owned_type {
+            type Error = Error;
+
+            fn try_from(val: &[u8]) -> Result<Self> {
+                let vec = Vec::try_from(val).map_err(|_| Error("Too many values"))?;
+                Ok(Self::from(Opaque::from(vec)))
+            }
+        }
+
+        impl AsRef<[u8]> for $owned_type {
+            fn as_ref(&self) -> &[u8] {
+                self.0.as_ref()
+            }
         }
     };
 }

@@ -1,12 +1,17 @@
 use crate::common::*;
-use crate::crypto::*;
+use crate::crypto::{self, *};
 use crate::io::*;
 use crate::syntax::*;
 use crate::{mls_enum, mls_newtype, mls_newtype_opaque, mls_struct};
 
 use core::ops::Deref;
+use heapless::Vec;
+use rand_core::CryptoRngCore;
 
 mod consts {
+    pub const SUPPORTED_VERSION: u16 = 0x0001; // mls10
+    pub const SUPPORTED_CREDENTIAL_TYPE: u16 = 0x0001; // basic
+
     pub const MAX_CREDENTIAL_SIZE: usize = 128;
     pub const MAX_PROTOCOL_VERSIONS: usize = 1;
     pub const MAX_CIPHER_SUITES: usize = 1;
@@ -124,12 +129,144 @@ mls_struct! {
 }
 
 mls_struct! {
-    LeafNode + LeafNodeView,
-    to_be_signed: LeafNodeTbs + LeafNodeTbsView,
-    signature: Signature + SignatureView,
+    LeafNodePriv + LeafNodePrivView,
+    encryption_priv: HpkePrivateKey + HpkePrivateKeyView,
+    signature_priv: SignaturePrivateKey + SignaturePrivateKeyView,
 }
 
-// TODO(RLB) Sign / verify
+#[derive(Clone, Default, Debug, PartialEq)]
+struct LeafNode {
+    to_be_signed: LeafNodeTbs,
+    to_be_signed_raw: Vec<u8, { Self::MAX_SIZE }>,
+    signature: Signature,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct LeafNodeView<'a> {
+    to_be_signed: LeafNodeTbsView<'a>,
+    to_be_signed_raw: &'a [u8],
+    signature: SignatureView<'a>,
+}
+
+impl LeafNode {
+    fn new(
+        rng: &mut impl CryptoRngCore,
+        leaf_node_source: LeafNodeSource,
+        signature_priv: SignaturePrivateKey,
+        signature_key: SignaturePublicKey,
+        credential: Credential,
+    ) -> Result<(LeafNodePriv, LeafNode)> {
+        // Construct the TBS object
+        let mut capabilities = Capabilities::default();
+        capabilities
+            .versions
+            .0
+            .push(ProtocolVersion::from(U16::from(consts::SUPPORTED_VERSION)))
+            .map_err(|_| Error("Too many items"))?;
+        capabilities
+            .cipher_suites
+            .0
+            .push(CipherSuite::from(U16::from(CIPHER_SUITE)))
+            .map_err(|_| Error("Too many items"))?;
+        capabilities
+            .credentials
+            .0
+            .push(CredentialType::from(U16::from(
+                consts::SUPPORTED_CREDENTIAL_TYPE,
+            )))
+            .map_err(|_| Error("Too many items"))?;
+
+        let (encryption_priv, encryption_key) = crypto::generate_hpke(rng)?;
+
+        let to_be_signed = LeafNodeTbs {
+            encryption_key,
+            signature_key,
+            credential,
+            leaf_node_source,
+            ..Default::default()
+        };
+
+        // Serialize the part to be signed
+        let mut to_be_signed_raw = Vec::new();
+        to_be_signed.serialize(&mut to_be_signed_raw)?;
+
+        // Populate the signature
+        // TODO(RLB) SignWithLabel
+        let signature = crypto::sign(&to_be_signed_raw, signature_priv.as_view())?;
+
+        let leaf_node_priv = LeafNodePriv {
+            encryption_priv,
+            signature_priv,
+        };
+        let leaf_node = LeafNode {
+            to_be_signed,
+            to_be_signed_raw,
+            signature,
+        };
+        Ok((leaf_node_priv, leaf_node))
+    }
+}
+
+impl<'a> LeafNodeView<'a> {
+    fn verify(&self) -> Result<bool> {
+        crypto::verify(
+            self.to_be_signed_raw.as_ref(),
+            self.to_be_signed.signature_key.clone(),
+            self.signature.clone(),
+        )
+    }
+}
+
+impl Serialize for LeafNode {
+    const MAX_SIZE: usize = sum(&[LeafNodeTbs::MAX_SIZE, Signature::MAX_SIZE]);
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        self.to_be_signed.serialize(writer)?;
+        self.signature.serialize(writer)?;
+        Ok(())
+    }
+}
+
+impl<'a> Deserialize<'a> for LeafNodeView<'a> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        let mut sub_reader = reader.fork();
+
+        let to_be_signed = LeafNodeTbsView::deserialize(&mut sub_reader)?;
+        let to_be_signed_raw = reader.read_ref(sub_reader.position())?;
+        let signature = SignatureView::deserialize(reader)?;
+
+        Ok(Self {
+            to_be_signed,
+            to_be_signed_raw,
+            signature,
+        })
+    }
+}
+
+impl AsView for LeafNode {
+    type View<'a> = LeafNodeView<'a>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        Self::View {
+            to_be_signed: self.to_be_signed.as_view(),
+            to_be_signed_raw: &self.to_be_signed_raw,
+            signature: self.signature.as_view(),
+        }
+    }
+}
+
+impl<'a> ToOwned for LeafNodeView<'a> {
+    type Owned = LeafNode;
+
+    fn to_owned(&self) -> Self::Owned {
+        Self::Owned {
+            to_be_signed: self.to_be_signed.to_owned(),
+            // Unwrap is safe because the length is guaranteed by construction
+            to_be_signed_raw: self.to_be_signed_raw.try_into().unwrap(),
+            signature: self.signature.to_owned(),
+        }
+    }
+}
 
 // KeyPackage
 mls_struct! {
@@ -147,4 +284,57 @@ mls_struct! {
     signature: Signature + SignatureView,
 }
 
-// TODO(RLB) Sign / verify
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::io::SliceReader;
+    use crate::make_storage;
+
+    #[test]
+    fn leaf_node_sign_verify() {
+        let rng = &mut rand::thread_rng();
+
+        let (signature_priv, signature_key) = crypto::generate_sig(rng).unwrap();
+        let credential = Credential::default();
+
+        let (_leaf_node_priv, leaf_node) = LeafNode::new(
+            rng,
+            LeafNodeSource::default(),
+            signature_priv,
+            signature_key,
+            credential,
+        )
+        .unwrap();
+
+        let mut storage = make_storage!(LeafNode);
+        leaf_node.serialize(&mut storage).unwrap();
+
+        let mut reader = SliceReader::new(&storage);
+        let leaf_node_view = LeafNodeView::deserialize(&mut reader).unwrap();
+
+        let ver = leaf_node_view.verify().unwrap();
+        assert!(ver);
+    }
+
+    /*
+    #[test]
+    fn key_package_sign_verify() {
+        let rng = &mut rand::thread_rng();
+
+        let (signature_priv, signature_key) = crypto::generate_sig(rng).unwrap();
+        let credential = Credential::default();
+
+        let (_key_package_priv, key_package) =
+            KeyPackage::new(rng, signature_priv, signature_key, credential).unwrap();
+
+        let mut storage: Vec<u8, { KeyPackage::MAX_SIZE }> = Vec::new();
+        key_package.write_to(&mut storage).unwrap();
+
+        let mut reader = SliceReader::new(&storage);
+        let key_package_view = KeyPackageView::read_from(&mut reader).unwrap();
+
+        let ver = key_package_view.verify().unwrap();
+        assert!(ver);
+    }
+    */
+}
