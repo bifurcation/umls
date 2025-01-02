@@ -23,6 +23,7 @@ mod consts {
     pub const MAX_CREDENTIAL_TYPES: usize = 1;
     pub const MAX_EXTENSION_SIZE: usize = 128;
     pub const MAX_EXTENSIONS: usize = 0;
+    pub const MAX_GROUP_ID_SIZE: usize = 16;
 }
 
 // Credentials
@@ -413,6 +414,134 @@ impl<'a> ToOwned for KeyPackageView<'a> {
     }
 }
 
+// GroupInfo
+mls_newtype_opaque! {
+    GroupId + GroupIdView,
+    GroupIdData + GroupIdViewData,
+    consts::MAX_GROUP_ID_SIZE
+}
+
+mls_newtype_primitive! { Epoch + EpochView => u64 }
+
+mls_struct! {
+    GroupContext + GroupContextView,
+    version: ProtocolVersion + ProtocolVersionView,
+    group_id: GroupId + GroupIdView,
+    epoch: Epoch + EpochView,
+    tree_hash: HashOutput + HashOutputView,
+    confirmed_transcript_hash: HashOutput + HashOutputView,
+    extensions: ExtensionList + ExtensionListView,
+}
+
+mls_newtype_primitive! { LeafIndex + LeafIndexView => u32 }
+
+mls_struct! {
+    GroupInfoTbs + GroupInfoTbsView,
+    group_context: GroupContext + GroupContextView,
+    extensions: ExtensionList + ExtensionListView,
+    confirmation_tag: HashOutput + HashOutputView,
+    signer: LeafIndex + LeafIndexView,
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
+struct GroupInfo {
+    to_be_signed: GroupInfoTbs,
+    to_be_signed_raw: Vec<u8, { Self::MAX_SIZE }>,
+    signature: Signature,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct GroupInfoView<'a> {
+    to_be_signed: GroupInfoTbsView<'a>,
+    to_be_signed_raw: &'a [u8],
+    signature: SignatureView<'a>,
+}
+
+impl GroupInfo {
+    const SIGNATURE_LABEL: &[u8] = b"GroupInfoTBS";
+
+    fn new(
+        to_be_signed: GroupInfoTbs,
+        signature_priv: SignaturePrivateKeyView,
+    ) -> Result<GroupInfo> {
+        // Serialize the part to be signed
+        let mut to_be_signed_raw = Vec::new();
+        to_be_signed.serialize(&mut to_be_signed_raw)?;
+
+        // Populate the signature
+        let signature =
+            crypto::sign_with_label(&to_be_signed_raw, Self::SIGNATURE_LABEL, signature_priv)?;
+
+        let group_info = GroupInfo {
+            to_be_signed,
+            to_be_signed_raw,
+            signature,
+        };
+        Ok(group_info)
+    }
+}
+
+impl<'a> GroupInfoView<'a> {
+    fn verify(&self, signature_key: SignaturePublicKeyView) -> Result<bool> {
+        crypto::verify_with_label(
+            self.to_be_signed_raw.as_ref(),
+            GroupInfo::SIGNATURE_LABEL,
+            signature_key,
+            self.signature.clone(),
+        )
+    }
+}
+
+impl Serialize for GroupInfo {
+    const MAX_SIZE: usize = sum(&[GroupInfoTbs::MAX_SIZE, Signature::MAX_SIZE]);
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        self.to_be_signed.serialize(writer)?;
+        self.signature.serialize(writer)?;
+        Ok(())
+    }
+}
+
+impl<'a> Deserialize<'a> for GroupInfoView<'a> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        let mut sub_reader = reader.fork();
+
+        let to_be_signed = GroupInfoTbsView::deserialize(&mut sub_reader)?;
+        let to_be_signed_raw = reader.read_ref(sub_reader.position())?;
+        let signature = SignatureView::deserialize(reader)?;
+
+        Ok(Self {
+            to_be_signed,
+            to_be_signed_raw,
+            signature,
+        })
+    }
+}
+
+impl AsView for GroupInfo {
+    type View<'a> = GroupInfoView<'a>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        Self::View {
+            to_be_signed: self.to_be_signed.as_view(),
+            to_be_signed_raw: &self.to_be_signed_raw,
+            signature: self.signature.as_view(),
+        }
+    }
+}
+
+impl<'a> ToOwned for GroupInfoView<'a> {
+    type Owned = GroupInfo;
+
+    fn to_owned(&self) -> Self::Owned {
+        Self::Owned {
+            to_be_signed: self.to_be_signed.to_owned(),
+            to_be_signed_raw: self.to_be_signed_raw.try_into().unwrap(),
+            signature: self.signature.to_owned(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -462,6 +591,26 @@ mod test {
         let key_package_view = KeyPackageView::deserialize(&mut reader).unwrap();
 
         let ver = key_package_view.verify().unwrap();
+        assert!(ver);
+    }
+
+    #[test]
+    fn group_info_sign_verify() {
+        let rng = &mut rand::thread_rng();
+
+        let (signature_priv, signature_key) = crypto::generate_sig(rng).unwrap();
+
+        let to_be_signed = GroupInfoTbs::default();
+
+        let group_info = GroupInfo::new(to_be_signed, signature_priv.as_view()).unwrap();
+
+        let mut storage = make_storage!(GroupInfo);
+        group_info.serialize(&mut storage).unwrap();
+
+        let mut reader = SliceReader::new(&storage);
+        let group_info_view = GroupInfoView::deserialize(&mut reader).unwrap();
+
+        let ver = group_info_view.verify(signature_key.as_view()).unwrap();
         assert!(ver);
     }
 }
