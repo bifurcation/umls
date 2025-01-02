@@ -2,7 +2,7 @@ use crate::common::*;
 use crate::crypto::{self, *};
 use crate::io::*;
 use crate::syntax::*;
-use crate::{mls_enum, mls_newtype, mls_newtype_opaque, mls_newtype_primitive, mls_struct};
+use crate::{mls_enum, mls_newtype_opaque, mls_newtype_primitive, mls_struct};
 
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};

@@ -1,7 +1,7 @@
 use crate::common::*;
 use crate::io::*;
 use crate::syntax::*;
-use crate::{mls_newtype, mls_newtype_opaque, mls_newtype_primitive};
+use crate::{mls_newtype_opaque, mls_newtype_primitive};
 
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};

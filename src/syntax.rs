@@ -41,9 +41,9 @@ pub trait ToOwned {
     fn to_owned(&self) -> Self::Owned;
 }
 
-// XXX(RLB) Note that these types can only be included in newtypes / structs / enums if they are
-// first wrapped using the `mls_newtype!` enum.  This is because the compunding macros assume
-// that the "view" type (the one that implements Deserialize) has a lifetime parameter.
+// XXX(RLB) Note that these types can only be included in structs / enums if they are first wrapped
+// using the `mls_newtype_primitive!` enum.  This is because the compunding macros assume that the
+// "view" type (the one that implements Deserialize) has a lifetime parameter.
 
 pub type PhantomLifetime<'a> = PhantomData<&'a ()>;
 
@@ -99,6 +99,22 @@ macro_rules! primitive_int_serde {
                 let slice = reader.read_ref(N)?;
                 let array: [u8; N] = slice.try_into().map_err(|_| Error("Unknown error"))?;
                 Ok(<$int>::from_be_bytes(array))
+            }
+        }
+
+        impl AsView for $int {
+            type View<'a> = $int;
+
+            fn as_view<'a>(&'a self) -> Self::View<'a> {
+                *self
+            }
+        }
+
+        impl ToOwned for $int {
+            type Owned = $int;
+
+            fn to_owned(&self) -> Self::Owned {
+                *self
             }
         }
     };
@@ -183,78 +199,6 @@ macro_rules! mls_newtype_primitive {
         }
     };
 }
-
-// XXX dele
-#[macro_export]
-macro_rules! mls_newtype {
-    ($owned_type:ident + $view_type:ident => $inner_owned_type:ident + $inner_view_type:ident) => {
-        #[derive(Clone, Default, Debug, PartialEq)]
-        pub struct $owned_type($inner_owned_type);
-
-        impl From<$inner_owned_type> for $owned_type {
-            fn from(val: $inner_owned_type) -> Self {
-                Self(val)
-            }
-        }
-
-        impl Deref for $owned_type {
-            type Target = $inner_owned_type;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-
-        #[derive(Clone, Debug, PartialEq)]
-        pub struct $view_type<'a>($inner_view_type<'a>);
-
-        impl<'a> From<$inner_view_type<'a>> for $view_type<'a> {
-            fn from(val: $inner_view_type<'a>) -> Self {
-                Self(val)
-            }
-        }
-
-        impl<'a> Deref for $view_type<'a> {
-            type Target = $inner_view_type<'a>;
-
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
-
-        impl Serialize for $owned_type {
-            const MAX_SIZE: usize = $inner_owned_type::MAX_SIZE;
-
-            fn serialize(&self, writer: &mut impl Write) -> Result<()> {
-                self.0.serialize(writer)
-            }
-        }
-
-        impl<'a> Deserialize<'a> for $view_type<'a> {
-            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-                Ok(Self($inner_view_type::deserialize(reader)?))
-            }
-        }
-
-        impl AsView for $owned_type {
-            type View<'a> = $view_type<'a>;
-
-            fn as_view<'a>(&'a self) -> Self::View<'a> {
-                $view_type::from(self.0.as_view())
-            }
-        }
-
-        impl<'a> ToOwned for $view_type<'a> {
-            type Owned = $owned_type;
-
-            fn to_owned(&self) -> Self::Owned {
-                $owned_type::from(self.0.to_owned())
-            }
-        }
-    };
-}
-
-
 
 #[derive(Default, Copy, Clone, PartialEq, Debug)]
 pub struct Varint(pub usize);
@@ -343,8 +287,8 @@ impl<'a> ToOwned for Varint {
     }
 }
 
-// XXX(RLB): Note that in order to use vectors in newtypes / enums / structs, you will need to
-// alias the view type with fixed type and length, so that the only free parameter is the lifetime.
+// XXX(RLB): Note that in order to use vectors in structs / enums, you will need to alias the view
+// type with fixed type and length, so that the only free parameter is the lifetime.
 
 impl<T: Serialize, const N: usize> Serialize for Vec<T, N> {
     const MAX_SIZE: usize = Varint::size(N * T::MAX_SIZE) + N * T::MAX_SIZE;
@@ -508,8 +452,68 @@ macro_rules! mls_newtype_opaque {
         type $inner_owned_type = Opaque<{ $size }>;
         type $inner_view_type<'a> = OpaqueView<'a, { $size }>;
 
-        mls_newtype! {
-            $owned_type + $view_type => $inner_owned_type + $inner_view_type
+        #[derive(Clone, Default, Debug, PartialEq)]
+        pub struct $owned_type($inner_owned_type);
+
+        impl From<$inner_owned_type> for $owned_type {
+            fn from(val: $inner_owned_type) -> Self {
+                Self(val)
+            }
+        }
+
+        impl Deref for $owned_type {
+            type Target = $inner_owned_type;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct $view_type<'a>($inner_view_type<'a>);
+
+        impl<'a> From<$inner_view_type<'a>> for $view_type<'a> {
+            fn from(val: $inner_view_type<'a>) -> Self {
+                Self(val)
+            }
+        }
+
+        impl<'a> Deref for $view_type<'a> {
+            type Target = $inner_view_type<'a>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+
+        impl Serialize for $owned_type {
+            const MAX_SIZE: usize = $inner_owned_type::MAX_SIZE;
+
+            fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                self.0.serialize(writer)
+            }
+        }
+
+        impl<'a> Deserialize<'a> for $view_type<'a> {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                Ok(Self($inner_view_type::deserialize(reader)?))
+            }
+        }
+
+        impl AsView for $owned_type {
+            type View<'a> = $view_type<'a>;
+
+            fn as_view<'a>(&'a self) -> Self::View<'a> {
+                $view_type::from(self.0.as_view())
+            }
+        }
+
+        impl<'a> ToOwned for $view_type<'a> {
+            type Owned = $owned_type;
+
+            fn to_owned(&self) -> Self::Owned {
+                $owned_type::from(self.0.to_owned())
+            }
         }
 
         impl TryFrom<&[u8]> for $owned_type {
@@ -517,7 +521,15 @@ macro_rules! mls_newtype_opaque {
 
             fn try_from(val: &[u8]) -> Result<Self> {
                 let vec = Vec::try_from(val).map_err(|_| Error("Too many values"))?;
-                Ok(Self::from(Opaque::from(vec)))
+                Ok(Self(Opaque::from(vec)))
+            }
+        }
+        
+        impl<'a> TryFrom<&'a [u8]> for $view_type<'a> {
+            type Error = Error;
+
+            fn try_from(val: &'a [u8]) -> Result<Self> {
+                Ok(Self(OpaqueView::try_from(val)?))
             }
         }
 
@@ -647,6 +659,7 @@ mod test {
     use crate::io::SliceReader;
 
     use core::fmt::Debug;
+    use core::ops::{Deref, DerefMut};
     use hex_literal::hex;
 
     fn test_serde<'a, T, V, const N: usize>(
@@ -677,29 +690,29 @@ mod test {
         let storage = make_storage!(Nil);
         test_serde(&Nil, &NilView(&()), &hex!(""), storage);
 
-        let storage = make_storage!(U8);
-        test_serde(&U8::from(0xa0), &U8View::from(0xa0), &hex!("a0"), storage);
+        let storage = make_storage!(u8);
+        test_serde(&0xa0_u8, &0xa0_u8, &hex!("a0"), storage);
 
-        let storage = make_storage!(U16);
+        let storage = make_storage!(u16);
         test_serde(
-            &U16::from(0xa0a1),
-            &U16View::from(0xa0a1),
+            &0xa0a1_u16,
+            &0xa0a1_u16,
             &hex!("a0a1"),
             storage,
         );
 
-        let storage = make_storage!(U32);
+        let storage = make_storage!(u32);
         test_serde(
-            &U32::from(0xa0a1a2a3),
-            &U32View::from(0xa0a1a2a3),
+            &0xa0a1a2a3_u32,
+            &0xa0a1a2a3_u32,
             &hex!("a0a1a2a3"),
             storage,
         );
 
-        let storage = make_storage!(U64);
+        let storage = make_storage!(u64);
         test_serde(
-            &U64::from(0xa0a1a2a3a4a5a6a7),
-            &U64View::from(0xa0a1a2a3a4a5a6a7),
+            &0xa0a1a2a3a4a5a6a7_u64,
+            &0xa0a1a2a3a4a5a6a7_u64,
             &hex!("a0a1a2a3a4a5a6a7"),
             storage,
         );
@@ -725,11 +738,11 @@ mod test {
     #[test]
     fn vector() {
         const N: usize = 5;
-        let storage = make_storage!(Vec<U32, N>);
+        let storage = make_storage!(Vec<u32, N>);
 
         let vals = [0xa0a0a0a0_u32; N];
-        let owned: Vec<U32, N> = vals.iter().cloned().map(U32::from).collect();
-        let view: Vec<U32View, N> = vals.iter().cloned().map(U32View::from).collect();
+        let owned: Vec<u32, N> = vals.as_ref().try_into().unwrap();
+        let view: Vec<u32, N> = vals.as_ref().try_into().unwrap();
 
         let serialized = &hex!("14a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0");
 
@@ -765,49 +778,70 @@ mod test {
         );
     }
 
-    mls_newtype! { CipherSuite + CipherSuiteView => U16 + U16View }
+    mls_newtype_primitive! { TestU8 + TestU8View => u8 }
+    mls_newtype_primitive! { TestU16 + TestU16View => u16 }
+    mls_newtype_primitive! { TestU32 + TestU32View => u32 }
+
+    mls_newtype_opaque! {
+        TestOpaque + TestOpaqueView, 
+        TestOpaqueData + TestOpaqueViewData,
+        5
+    }
 
     #[test]
     fn mls_newtype() {
-        let storage = make_storage!(CipherSuite);
-        let suite = 0x0123;
+        assert_eq!(TestU16::MAX_SIZE, u16::MAX_SIZE);
+        assert_eq!(TestOpaque::MAX_SIZE, 6);
+
+        let storage = make_storage!(TestU16);
+        let value = 0x0123;
 
         test_serde(
-            &CipherSuite::from(U16::from(suite)),
-            &CipherSuiteView::from(U16View::from(suite)),
+            &TestU16::from(value),
+            &TestU16View::from(value),
             &hex!("0123"),
             storage,
         );
-    }
 
-    type TestOpaque = Opaque<5>;
-    type TestOpaqueView<'a> = OpaqueView<'a, 5>;
+        let storage = make_storage!(TestOpaque);
+        let opaque = [1_u8,2,3,4,5];
+
+        test_serde(
+            &TestOpaque::try_from(opaque.as_ref()).unwrap(),
+            &TestOpaqueView::try_from(opaque.as_ref()).unwrap(),
+            &hex!("050102030405"),
+            storage,
+        );
+
+    }
 
     mls_struct! {
         TestStruct + TestStructView,
-        field1: U32 + U32View,
-        field2: U8 + U8View,
+        field1: TestU32 + TestU32View,
+        field2: TestU8 + TestU8View,
         field3: TestOpaque + TestOpaqueView,
     }
 
     #[test]
     fn mls_struct() {
+        assert_eq!(TestStruct::MAX_SIZE, 11);
+
         let storage = make_storage!(TestStruct);
 
         let raw1 = 0x01234567;
         let raw2 = 0xff;
-        let raw3 = [1, 2, 3, 4, 5];
+        let raw3 = [1_u8, 2, 3, 4, 5];
 
         let owned = TestStruct {
-            field1: U32::from(raw1),
-            field2: U8::from(raw2),
-            field3: TestOpaque::from(Vec::from_slice(&raw3).unwrap()),
+            field1: TestU32::from(raw1),
+            field2: TestU8::from(raw2),
+            field3: TestOpaque::try_from(raw3.as_ref()).unwrap(),
         };
 
         let view = TestStructView {
-            field1: U32View::from(raw1),
-            field2: U8View::from(raw2),
-            field3: TestOpaqueView::try_from(&raw3[..]).unwrap(),
+            field1: TestU32View::from(raw1),
+            field2: TestU8View::from(raw2),
+            field3: TestOpaqueView::try_from(raw3.as_ref()).unwrap(),
         };
 
         let serialized = &hex!("01234567ff050102030405");
@@ -817,8 +851,8 @@ mod test {
 
     mls_enum! {
         u8 => TestEnum + TestEnumView,
-        1 => A(U32 + U32View),
-        2 => B(U8 + U8View),
+        1 => A(TestU32 + TestU32View),
+        2 => B(TestU8 + TestU8View),
         3 => C(TestOpaque + TestOpaqueView),
     }
 
@@ -841,10 +875,9 @@ mod test {
         );
 
         let raw = [1_u8, 2, 3, 4, 5];
-        let raw = &raw[..];
         test_serde(
-            &TestEnum::C(Vec::try_from(raw).unwrap().into()),
-            &TestEnumView::C(raw.try_into().unwrap()),
+            &TestEnum::C(raw.as_ref().try_into().unwrap()),
+            &TestEnumView::C(raw.as_ref().try_into().unwrap()),
             &hex!("03050102030405"),
             make_storage!(TestEnum),
         );
