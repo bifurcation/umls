@@ -1,6 +1,7 @@
 use crate::common::*;
-use crate::io::{ReadRef, Write};
+use crate::io::{CountWriter, ReadRef, Write};
 
+use core::convert::{TryFrom, TryInto};
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use heapless::Vec;
@@ -26,8 +27,6 @@ pub trait Deserialize<'a>: Sized {
     /// or reference types, via the [ReadRef] trait.
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self>;
 }
-
-// Primitives
 
 // XXX(RLB) Note that these types can only be included in newtypes / structs / enums if they are
 // first wrapped using the `primitive_newtype!` enum.  This is because the compunding macros assume
@@ -122,29 +121,46 @@ primitive_int_serde!(u16 => U16 + U16View);
 primitive_int_serde!(u32 => U32 + U32View);
 primitive_int_serde!(u64 => U64 + U64View);
 
-// Varint and Vector
-
 #[derive(Default, Copy, Clone, PartialEq, Debug)]
 struct Varint(usize);
+
+impl Varint {
+    const MAX_1: usize = 1 << 6;
+    const MAX_2: usize = 1 << 14;
+    const MAX_4: usize = 1 << 30;
+
+    const fn size(n: usize) -> usize {
+        match n {
+            n if n < Self::MAX_1 => 1,
+            n if n < Self::MAX_2 => 2,
+            n if n < Self::MAX_4 => 4,
+
+            // XXX(RLB) This isn't technically correct, since this value will never serialize.  But
+            // it saves having to return Result<usize> from a const fn.
+            _ => 8,
+        }
+    }
+}
 
 impl Serialize for Varint {
     const MAX_SIZE: usize = 4;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
-        let data = &mut self.0.to_be_bytes()[4..];
-        if self.0 < (1 << 6) {
-            writer.write(&data[3..4])?;
-            Ok(())
-        } else if self.0 < (1 << 14) {
-            data[2] |= 0x40;
-            writer.write(&data[2..4])?;
-            Ok(())
-        } else if self.0 < (1 << 30) {
-            data[0] |= 0x80;
-            writer.write(&data[..4])?;
-            Ok(())
-        } else {
-            Err(Error("Invalid value"))
+        let val: u32 = self.0.try_into().map_err(|_| Error("Invalid value"))?;
+        let mut data = val.to_be_bytes();
+
+        match val {
+            _ if self.0 < Self::MAX_1 => writer.write(&data[3..]),
+            _ if self.0 < Self::MAX_2 => {
+                data[2] |= 0x40;
+                writer.write(&data[2..])
+            }
+            _ if self.0 < Self::MAX_4 => {
+                data[0] |= 0x80;
+                writer.write(&data)
+            }
+
+            _ => Err(Error("Invalid value")),
         }
     }
 }
@@ -198,9 +214,19 @@ impl<'a, V: Deserialize<'a>, const N: usize> From<Vec<V, N>> for VectorView<'a, 
 }
 
 impl<T: Serialize, const N: usize> Serialize for Vector<T, N> {
-    const MAX_SIZE: usize = N * T::MAX_SIZE;
+    const MAX_SIZE: usize = Varint::size(N * T::MAX_SIZE) + N * T::MAX_SIZE;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        // First, serialize everything to a writer that just counts how much would be serialized
+        let mut counter = CountWriter::default();
+        for val in self.0.iter() {
+            val.serialize(&mut counter)?;
+        }
+
+        // Then, serialize the length
+        Varint(counter.len()).serialize(writer)?;
+
+        // Then serialize the contents for real
         for val in self.0.iter() {
             val.serialize(writer)?;
         }
@@ -210,8 +236,55 @@ impl<T: Serialize, const N: usize> Serialize for Vector<T, N> {
 
 impl<'a, V: Deserialize<'a>, const N: usize> Deserialize<'a> for VectorView<'a, V, N> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-        let vec: Result<Vec<V, N>> = (0..N).map(|_| V::deserialize(reader)).collect();
-        Ok(Self(vec?, PhantomData))
+        let len = Varint::deserialize(reader)?;
+
+        let mut content = reader.take(len.0)?;
+        let mut vec: Vec<V, N> = Vec::new();
+        while !content.is_empty() {
+            vec.push(V::deserialize(&mut content)?)
+                .map_err(|_| Error("Too many items"))?;
+        }
+
+        Ok(Self(vec, PhantomData))
+    }
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
+struct Opaque<const N: usize>(pub Vec<u8, N>);
+
+impl<const N: usize> From<Vec<u8, N>> for Opaque<N> {
+    fn from(val: Vec<u8, N>) -> Self {
+        Self(val)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct OpaqueView<'a, const N: usize>(pub &'a [u8]);
+
+impl<'a, const N: usize> TryFrom<&'a [u8]> for OpaqueView<'a, N> {
+    type Error = Error;
+
+    fn try_from(val: &'a [u8]) -> Result<Self> {
+        (val.len() <= N)
+            .then_some(Self(val))
+            .ok_or(Error("Too many items"))
+    }
+}
+
+impl<const N: usize> Serialize for Opaque<N> {
+    const MAX_SIZE: usize = Varint::size(N) + N;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        Varint(self.0.len()).serialize(writer)?;
+        writer.write(&self.0)
+    }
+}
+
+impl<'a, const N: usize> Deserialize<'a> for OpaqueView<'a, N> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        let len = Varint::deserialize(reader)?;
+        let content = reader.read_ref(len.0)?;
+        Self::try_from(content)
     }
 }
 
@@ -301,11 +374,35 @@ mod test {
         let owned: Vec<U32, N> = vals.iter().cloned().map(U32::from).collect();
         let views: Vec<U32View, N> = vals.iter().cloned().map(U32View::from).collect();
 
-        let serialized = &hex!("a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0");
+        let serialized = &hex!("14a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0");
 
         test_serde(
             Vector::from(owned),
             VectorView::from(views),
+            serialized,
+            storage,
+        );
+    }
+
+    #[test]
+    fn opaque() {
+        const N: usize = 64;
+        let storage = make_storage!(Opaque<N>);
+
+        let vals = [0xa0; N];
+        let owned = Vec::<u8, N>::from_slice(&vals).unwrap();
+        let view = &vals[..];
+
+        let serialized = &hex!("4040"
+            "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"
+            "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"
+            "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"
+            "a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0"
+        );
+
+        test_serde(
+            Opaque::<N>::from(owned),
+            OpaqueView::<N>::try_from(view).unwrap(),
             serialized,
             storage,
         );

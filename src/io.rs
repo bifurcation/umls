@@ -8,7 +8,7 @@ pub trait Write {
     fn write(&mut self, buf: &[u8]) -> Result<()>;
 }
 
-pub trait ReadRef<'a> {
+pub trait ReadRef<'a>: Sized {
     /// Returns a reference to the first `n` bytes read.  Returns an error if less than `n` bytes
     /// are available.
     fn read_ref(&mut self, n: usize) -> Result<&'a [u8]>;
@@ -16,9 +16,15 @@ pub trait ReadRef<'a> {
     /// How many bytes have been read from this reader
     fn position(&self) -> usize;
 
+    /// Are there more bytes to be read?
+    fn is_empty(&self) -> bool;
+
     /// Create a new reader on the same data stream, starting at the current position but
     /// reading and advancing independently.
     fn fork(&self) -> Self;
+
+    /// Create a new reader for the next `n` bytes, and advance this reader past those `n` bytes.
+    fn take(&mut self, n: usize) -> Result<Self>;
 
     /// Returns a copy of the first byte available.  Returns n error if the reader is empty.
     fn peek(&self) -> Result<u8>;
@@ -28,6 +34,29 @@ impl<const N: usize> Write for Vec<u8, N> {
     fn write(&mut self, data: &[u8]) -> Result<()> {
         self.extend_from_slice(data)
             .map_err(|_| Error("Insufficient capacity"))
+    }
+}
+
+pub struct CountWriter {
+    len: usize,
+}
+
+impl Default for CountWriter {
+    fn default() -> Self {
+        Self { len: 0 }
+    }
+}
+
+impl CountWriter {
+    pub fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl Write for CountWriter {
+    fn write(&mut self, data: &[u8]) -> Result<()> {
+        self.len += data.len();
+        Ok(())
     }
 }
 
@@ -55,6 +84,14 @@ impl<'a> ReadRef<'a> for SliceReader<'a> {
         Ok(&self.data[start..self.pos])
     }
 
+    fn position(&self) -> usize {
+        self.pos
+    }
+
+    fn is_empty(&self) -> bool {
+        self.pos >= self.data.len()
+    }
+
     fn fork(&self) -> Self {
         Self {
             data: &self.data[self.pos..],
@@ -62,8 +99,8 @@ impl<'a> ReadRef<'a> for SliceReader<'a> {
         }
     }
 
-    fn position(&self) -> usize {
-        self.pos
+    fn take(&mut self, n: usize) -> Result<Self> {
+        self.read_ref(n).map(Self::new)
     }
 
     fn peek(&self) -> Result<u8> {
@@ -90,6 +127,19 @@ mod test {
         // Failed write
         let mut writer: Vec<u8, { MSG.len() - 1 }> = Vec::new();
         assert!(writer.write(MSG).is_err());
+    }
+
+    #[test]
+    fn count_write() {
+        // Successful write
+        const MSG: &[u8] = b"hello";
+        const N: usize = 50;
+
+        let mut writer = CountWriter::default();
+        for i in 0..N {
+            writer.write(MSG).unwrap();
+            assert_eq!(writer.len(), (i + 1) * MSG.len());
+        }
     }
 
     #[test]
