@@ -25,7 +25,9 @@ mod consts {
     pub const MAX_GROUP_ID_SIZE: usize = 16;
     pub const MAX_WELCOME_PSKS: usize = 0;
     pub const MAX_JOINERS_PER_WELCOME: usize = 1;
-
+    pub const MAX_PRIVATE_MESSAGE_AAD_SIZE: usize = 0;
+    pub const MAX_PROPOSALS_PER_COMMIT: usize = 1;
+    pub const MAX_UPDATE_PATH_LENGTH: usize = 2; // TODO(RLB) log2(MAX_GROUP_SIZE)
 }
 
 // A macro to generate signed data structures
@@ -432,29 +434,6 @@ mls_signed! { GroupInfo + GroupInfoView + b"GroupInfoTBS" => GroupInfoTbs + Grou
 
 // Welcome
 
-/*
-struct {
-  opaque path_secret<V>;
-} PathSecret;
-
-struct {
-  opaque joiner_secret<V>;
-  optional<PathSecret> path_secret;
-  PreSharedKeyID psks<V>;
-} GroupSecrets;
-
-struct {
-  KeyPackageRef new_member;
-  HPKECiphertext encrypted_group_secrets;
-} EncryptedGroupSecrets;
-
-struct {
-  CipherSuite cipher_suite;
-  EncryptedGroupSecrets secrets<V>;
-  opaque encrypted_group_info<V>;
-} Welcome;
-*/
-
 type OptionalPathSecret = Option<HashOutput>;
 type OptionalPathSecretView<'a> = Option<HashOutputView<'a>>;
 
@@ -501,6 +480,98 @@ mls_struct! {
     secrets: EncryptedGroupSecretsList + EncryptedGroupSecretsListView,
     encrypted_group_info: EncryptedGroupInfo + EncryptedGroupInfoView,
 }
+
+// PrivateMessage
+mls_encrypted! {
+    EncryptedPathSecret + EncryptedPathSecretView,
+    HashOutput + HashOutputView,
+}
+
+mls_struct! {
+    UpdatePathNode + UpdatePathNodeView,
+    encryption_key: HpkePublicKey + HpkePublicKeyView,
+    encrypted_path_secret: EncryptedPathSecret + EncryptedPathSecretView,
+}
+
+type UpdatePathNodeList = Vec<UpdatePathNode, { consts::MAX_PROPOSALS_PER_COMMIT }>;
+type UpdatePathNodeListView<'a> = Vec<UpdatePathNodeView<'a>, { consts::MAX_PROPOSALS_PER_COMMIT }>;
+
+mls_struct! {
+    UpdatePath + UpdatePathView,
+    leaf_node: LeafNode + LeafNodeView,
+    nodes: UpdatePathNodeList + UpdatePathNodeListView,
+}
+
+mls_struct! {
+    Add + AddView,
+    key_package: KeyPackage + KeyPackageView,
+}
+
+mls_struct! {
+    Remove + RemoveView,
+    removed: LeafIndex + LeafIndexView,
+}
+
+mls_enum! {
+    u16 => Proposal + ProposalView,
+    1 => Add(Add + AddView),
+    3 => Remove(Remove + RemoveView),
+}
+
+mls_enum! {
+    u8 => ProposalOrRef + ProposalOrRefView,
+    1 => Proposal(Proposal + ProposalView),
+}
+
+type OptionalUpdatePath = Option<UpdatePath>;
+type OptionalUpdatePathView<'a> = Option<UpdatePathView<'a>>;
+
+type ProposalList = Vec<ProposalOrRef, { consts::MAX_PROPOSALS_PER_COMMIT }>;
+type ProposalListView<'a> = Vec<ProposalOrRefView<'a>, { consts::MAX_PROPOSALS_PER_COMMIT }>;
+
+mls_struct! {
+    Commit + CommitView,
+    proposals: ProposalList + ProposalListView,
+    path: OptionalUpdatePath + OptionalUpdatePathView,
+}
+
+mls_enum! {
+    u8 => Sender + SenderView,
+    1 => Member(LeafIndex + LeafIndexView),
+}
+
+impl Default for Sender {
+    fn default() -> Self {
+        Self::Member(LeafIndex(0))
+    }
+}
+
+mls_enum! {
+    u8 => PrivateMessageContent + PrivateMessageContentView,
+    3 => Commit(Commit + CommitView),
+}
+
+impl Default for PrivateMessageContent {
+    fn default() -> Self {
+        Self::Commit(Commit::default())
+    }
+}
+
+mls_newtype_opaque! {
+    PrivateMessageAad + PrivateMessageAadView,
+    consts::MAX_PRIVATE_MESSAGE_AAD_SIZE
+}
+
+mls_struct! {
+    FramedContent + FramedContentView,
+    group_id: GroupId + GroupIdView,
+    epoch: Epoch + EpochView,
+    sender: Sender + SenderView,
+    authenticated_data: PrivateMessageAad + PrivateMessageAadView,
+    content: PrivateMessageContent + PrivateMessageContentView,
+}
+
+// TODO(RLB): Keep building toward PrivateMessage
 
 // TODO(RLB): Stub structs below this line
 
