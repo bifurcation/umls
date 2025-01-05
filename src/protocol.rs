@@ -2,7 +2,7 @@ use crate::common::*;
 use crate::crypto::{self, *};
 use crate::io::*;
 use crate::syntax::*;
-use crate::{mls_enum, mls_newtype_opaque, mls_newtype_primitive, mls_struct};
+use crate::{make_storage, mls_enum, mls_newtype_opaque, mls_newtype_primitive, mls_struct};
 
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
@@ -23,6 +23,9 @@ mod consts {
     pub const MAX_EXTENSION_SIZE: usize = 128;
     pub const MAX_EXTENSIONS: usize = 0;
     pub const MAX_GROUP_ID_SIZE: usize = 16;
+    pub const MAX_WELCOME_PSKS: usize = 0;
+    pub const MAX_JOINERS_PER_WELCOME: usize = 1;
+
 }
 
 // A macro to generate signed data structures
@@ -131,6 +134,102 @@ macro_rules! mls_signed {
         }
     };
 }
+
+// A macro to generate AEAD-encrypted data structures
+macro_rules! mls_encrypted {
+    ($ct_owned_type:ident + $ct_view_type:ident, 
+     $inner_owned_type:ident + $inner_view_type:ident, 
+     $pt_owned_type:ident + $pt_view_type:ident,) => {
+        mls_newtype_opaque! {
+            $ct_owned_type + $ct_view_type,
+            $inner_owned_type + $inner_view_type,
+            { $pt_owned_type::MAX_SIZE + crypto::AEAD_OVERHEAD }
+        }
+
+        impl $ct_owned_type {
+            const MAX_CT_SIZE: usize = $pt_owned_type::MAX_SIZE + crypto::AEAD_OVERHEAD;
+
+            fn seal(
+                plaintext: $pt_owned_type,
+                key: AeadKey,
+                nonce: AeadNonce,
+                aad: &[u8],
+            ) -> Result<Self> {
+                let mut pt = make_storage!($pt_owned_type);
+                plaintext.serialize(&mut pt)?;
+
+                let mut ct = Vec::<u8, { Self::MAX_CT_SIZE }>::new();
+                ct.resize_default(pt.len() + crypto::AEAD_OVERHEAD)
+                    .map_err(|_| Error("Unexpected error"))?;
+                let len = crypto::aead_seal(&mut ct, &pt, key, nonce, aad);
+                ct.resize_default(len).map_err(|_| Error("Unexpected error"))?;
+
+                Ok(Self(Opaque::from(ct)))
+            }
+        }
+
+        impl<'a> $ct_view_type<'a> {
+            fn open(
+                &self,
+                key: AeadKey,
+                nonce: AeadNonce,
+                aad: &[u8],
+            ) -> Result<Vec<u8, { $pt_owned_type::MAX_SIZE }>> {
+                let ct = self.0.as_ref();
+
+                let mut pt = Vec::new();
+                pt.resize_default(pt.capacity())
+                    .map_err(|_| Error("Unexpected error"))?;
+                let len = crypto::aead_open(&mut pt, &ct, key, nonce, aad)?;
+                pt.resize(len, 0).map_err(|_| Error("Unexpected error"))?;
+
+                Ok(pt)
+            }
+        }
+    };
+}
+
+// A macro to generate HPKE-encrypted data structures, with a given AEAD-encrypted struct
+macro_rules! mls_hpke_encrypted {
+    ($hpke_owned_type:ident + $hpke_view_type:ident, 
+     $ct_owned_type:ident + $ct_view_type:ident, 
+     $pt_owned_type:ident + $pt_view_type:ident,) => {
+        mls_struct! {
+            $hpke_owned_type + $hpke_view_type,
+            kem_output: HpkeKemOutput + HpkeKemOutputView,
+            ciphertext: $ct_owned_type + $ct_view_type,
+        }
+
+        impl $hpke_owned_type {
+            fn seal(
+                plaintext: $pt_owned_type,
+                encryption_key: HpkePublicKeyView,
+                aad: &[u8],
+            ) -> Result<Self> {
+                let (kem_output, kem_secret) = crypto::hpke_encap(encryption_key);
+                let (key, nonce) = crypto::hpke_key_nonce(kem_secret);
+
+                let ciphertext = $ct_owned_type::seal(plaintext, key, nonce, aad)?;
+
+                Ok(Self{ kem_output, ciphertext })
+            }
+        }
+
+        impl<'a> $hpke_view_type<'a> {
+            fn open(
+                &self,
+                encryption_priv: HpkePrivateKeyView,
+                aad: &[u8],
+            ) -> Result<Vec<u8, { $pt_owned_type::MAX_SIZE }>> {
+                let kem_secret = crypto::hpke_decap(encryption_priv, self.kem_output);
+                let (key, nonce) = crypto::hpke_key_nonce(kem_secret);
+
+                self.ciphertext.open(key, nonce, aad)
+            }
+        }
+    };
+}
+
 
 // Optional values
 impl<T: Serialize> Serialize for Option<T> {
@@ -361,6 +460,54 @@ struct {
 } Welcome;
 */
 
+type OptionalPathSecret = Option<HashOutput>;
+type OptionalPathSecretView<'a> = Option<HashOutputView<'a>>;
+
+// XXX(RLB) These are stubs for now because we don't support PSKs; the `psks` vector must always
+// have length zero.
+type PreSharedKeyIDList = Vec<Nil, { consts::MAX_WELCOME_PSKS }>;
+type PreSharedKeyIDListView<'a> = Vec<NilView<'a>, { consts::MAX_WELCOME_PSKS }>;
+
+mls_struct! {
+    GroupSecrets + GroupSecretsView,
+    joiner_secret: HashOutput + HashOutputView,
+    path_secret: OptionalPathSecret + OptionalPathSecretView,
+    psks: PreSharedKeyIDList + PreSharedKeyIDListView,
+}
+
+mls_encrypted! {
+    AeadEncryptedGroupSecrets + AeadEncryptedGroupSecretsView,
+    AeadEncryptedGroupSecretsData + AeadEncryptedGroupSecretsViewData,
+    GroupSecrets + GroupSecretsView,
+}
+
+mls_hpke_encrypted! {
+    HpkeEncryptedGroupSecrets + HpkeEncryptedGroupSecretsView,
+    AeadEncryptedGroupSecrets + AeadEncryptedGroupSecretsView,
+    GroupSecrets + GroupSecretsView,
+}
+
+mls_struct! {
+    EncryptedGroupSecrets + EncryptedGroupSecretsView,
+    new_member: HashOutput + HashOutputView,
+    encrypted_group_secrets: HpkeEncryptedGroupSecrets + HpkeEncryptedGroupSecretsView,
+}
+
+type EncryptedGroupSecretsList = Vec<EncryptedGroupSecrets, { consts::MAX_JOINERS_PER_WELCOME }>;
+type EncryptedGroupSecretsListView<'a> = Vec<EncryptedGroupSecretsView<'a>, { consts::MAX_JOINERS_PER_WELCOME }>;
+
+mls_encrypted! {
+    EncryptedGroupInfo + EncryptedGroupInfoView,
+    EncryptedGroupInfoData + EncryptedGroupInfoViewData,
+    GroupInfo + GroupInfoView,
+}
+
+mls_struct! {
+    Welcome + WelcomeView,
+    cipher_suite: CipherSuite + CipherSuiteView,
+    secrets: EncryptedGroupSecretsList + EncryptedGroupSecretsListView,
+    encrypted_group_info: EncryptedGroupInfo + EncryptedGroupInfoView,
+}
 
 // TODO(RLB): Stub structs below this line
 
@@ -368,9 +515,6 @@ mls_struct! {
     Dummy + DummyView,
     dummy: Nil + NilView,
 }
-
-pub type Welcome = Dummy;
-pub type WelcomeView<'a> = DummyView<'a>;
 
 pub type GroupState = Dummy;
 pub type GroupStateView<'a> = DummyView<'a>;

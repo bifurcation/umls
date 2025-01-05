@@ -20,15 +20,21 @@ pub mod consts {
 
     pub const HPKE_PRIVATE_KEY_SIZE: usize = 32;
     pub const HPKE_PUBLIC_KEY_SIZE: usize = 32;
+    pub const HPKE_KEM_OUTPUT_SIZE: usize = HPKE_PUBLIC_KEY_SIZE;
+    pub const HPKE_KEM_SECRET_SIZE: usize = HASH_OUTPUT_SIZE;
 
     pub const SIGNATURE_PRIVATE_KEY_SIZE: usize = 64;
     pub const SIGNATURE_PUBLIC_KEY_SIZE: usize = 32;
     pub const SIGNATURE_SIZE: usize = 64;
 
     pub const AEAD_OVERHEAD: usize = 16;
+    pub const AEAD_KEY_SIZE: usize = 16;
+    pub const AEAD_NONCE_SIZE: usize = 12;
 }
 
 mls_newtype_primitive! { CipherSuite + CipherSuiteView => u16 }
+
+pub use consts::AEAD_OVERHEAD;
 pub use consts::CIPHER_SUITE;
 
 mls_newtype_opaque! {
@@ -50,6 +56,18 @@ mls_newtype_opaque! {
 }
 
 mls_newtype_opaque! {
+    HpkeKemOutput + HpkeKemOutputView,
+    HpkeKemOutputData + HpkeKemOutputViewData,
+    consts::HPKE_KEM_OUTPUT_SIZE
+}
+
+mls_newtype_opaque! {
+    HpkeKemSecret + HpkeKemSecretView,
+    HpkeKemSecretData + HpkeKemSecretViewData,
+    consts::HPKE_KEM_SECRET_SIZE
+}
+
+mls_newtype_opaque! {
     SignaturePrivateKey + SignaturePrivateKeyView,
     SignaturePrivateKeyData + SignaturePrivateKeyViewData,
     consts::SIGNATURE_PRIVATE_KEY_SIZE
@@ -64,6 +82,18 @@ mls_newtype_opaque! {
 mls_newtype_opaque! {
     Signature + SignatureView,
     SignatureData + SignatureViewData,
+    consts::SIGNATURE_SIZE
+}
+
+mls_newtype_opaque! {
+    AeadKey + AeadKeyView,
+    AeadKeyData + AeadKeyViewData,
+    consts::SIGNATURE_SIZE
+}
+
+mls_newtype_opaque! {
+    AeadNonce + AeadNonceView,
+    AeadNonceData + AeadNonceViewData,
     consts::SIGNATURE_SIZE
 }
 
@@ -167,4 +197,33 @@ pub fn generate_hpke(rng: &mut impl CryptoRngCore) -> Result<(HpkePrivateKey, Hp
     let hpke_key = HpkePublicKey::try_from(pub_bytes.as_slice()).unwrap();
 
     Ok((hpke_priv, hpke_key))
+}
+
+pub fn hpke_encap(encryption_key: HpkePublicKeyView) -> (HpkeKemOutput, HpkeKemSecret) {
+    todo!();
+}
+
+pub fn hpke_decap(
+    encryption_priv: HpkePrivateKeyView,
+    kem_output: HpkeKemOutputView,
+) -> HpkeKemSecret {
+    todo!();
+}
+
+pub fn hpke_key_nonce(secret: HpkeKemSecret) -> (AeadKey, AeadNonce) {
+    todo!();
+}
+
+pub fn aead_seal(ct: &mut [u8], pt: &[u8], key: AeadKey, nonce: AeadNonce, aad: &[u8]) -> usize {
+    todo!();
+}
+
+pub fn aead_open(
+    pt: &mut [u8],
+    ct: &[u8],
+    key: AeadKey,
+    nonce: AeadNonce,
+    aad: &[u8],
+) -> Result<usize> {
+    todo!();
 }

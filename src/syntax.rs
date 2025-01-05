@@ -369,7 +369,7 @@ impl<const N: usize> AsRef<[u8]> for Opaque<N> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct OpaqueView<'a, const N: usize>(pub &'a [u8]);
 
 impl<'a, const N: usize> TryFrom<&'a [u8]> for OpaqueView<'a, N> {
@@ -469,7 +469,7 @@ macro_rules! mls_newtype_opaque {
             }
         }
 
-        #[derive(Clone, Debug, PartialEq)]
+        #[derive(Copy, Clone, Debug, PartialEq)]
         pub struct $view_type<'a>($inner_view_type<'a>);
 
         impl<'a> From<$inner_view_type<'a>> for $view_type<'a> {
