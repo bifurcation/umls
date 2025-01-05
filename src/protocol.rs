@@ -132,6 +132,52 @@ macro_rules! mls_signed {
     };
 }
 
+// Optional values
+impl<T: Serialize> Serialize for Option<T> {
+    const MAX_SIZE: usize = 1 + T::MAX_SIZE;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        match self {
+            None => writer.write(&[0]),
+            Some(val) => writer.write(&[1]).and_then(|_| val.serialize(writer))
+        }
+    }
+}
+
+impl<'a, V: Deserialize<'a>> Deserialize<'a> for Option<V> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        let indicator = u8::deserialize(reader)?;
+        match indicator {
+            0 => Ok(None),
+            1 => V::deserialize(reader).and_then(|val| Ok(Some(val))),
+            _ => Err(Error("Invalid encoding"))
+        }
+    }
+}
+
+impl<T: AsView> AsView for Option<T> {
+    type View<'a> = Option<T::View<'a>> where T: 'a;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        match self {
+            None => None,
+            Some(val) => Some(val.as_view()),
+        }
+    }
+}
+
+impl<V: ToOwned> ToOwned for Option<V> {
+    type Owned = Option<V::Owned>;
+
+    fn to_owned(&self) -> Self::Owned {
+        match self {
+            None => None,
+            Some(val) => Some(val.to_owned()),
+        }
+    }
+}
+
+
 // Credentials
 mls_newtype_opaque! {
     BasicCredential + BasicCredentialView,
@@ -289,6 +335,32 @@ mls_struct! {
 }
 
 mls_signed! { GroupInfo + GroupInfoView + b"GroupInfoTBS" => GroupInfoTbs + GroupInfoTbsView }
+
+// Welcome
+
+/*
+struct {
+  opaque path_secret<V>;
+} PathSecret;
+
+struct {
+  opaque joiner_secret<V>;
+  optional<PathSecret> path_secret;
+  PreSharedKeyID psks<V>;
+} GroupSecrets;
+
+struct {
+  KeyPackageRef new_member;
+  HPKECiphertext encrypted_group_secrets;
+} EncryptedGroupSecrets;
+
+struct {
+  CipherSuite cipher_suite;
+  EncryptedGroupSecrets secrets<V>;
+  opaque encrypted_group_info<V>;
+} Welcome;
+*/
+
 
 // TODO(RLB): Stub structs below this line
 

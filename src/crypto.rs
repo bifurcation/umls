@@ -24,6 +24,8 @@ pub mod consts {
     pub const SIGNATURE_PRIVATE_KEY_SIZE: usize = 64;
     pub const SIGNATURE_PUBLIC_KEY_SIZE: usize = 32;
     pub const SIGNATURE_SIZE: usize = 64;
+
+    pub const AEAD_OVERHEAD: usize = 16;
 }
 
 mls_newtype_primitive! { CipherSuite + CipherSuiteView => u16 }
@@ -122,7 +124,6 @@ fn signature_digest(message: &[u8], label: &[u8]) -> Result<HashOutput> {
     Ok(h.finalize())
 }
 
-// TODO(RLB) SignWithLabel
 pub fn sign_with_label(
     message: &[u8],
     label: &[u8],
@@ -138,7 +139,6 @@ pub fn sign_with_label(
     Ok(signature)
 }
 
-// TODO(RLB) VerifyWithLabel
 pub fn verify_with_label(
     message: &[u8],
     label: &[u8],
