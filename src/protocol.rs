@@ -284,14 +284,14 @@ mls_struct! {
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
-struct KeyPackage {
+pub struct KeyPackage {
     to_be_signed: KeyPackageTbs,
     to_be_signed_raw: Vec<u8, { Self::MAX_SIZE }>,
     signature: Signature,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct KeyPackageView<'a> {
+pub struct KeyPackageView<'a> {
     to_be_signed: KeyPackageTbsView<'a>,
     to_be_signed_raw: &'a [u8],
     signature: SignatureView<'a>,
@@ -541,6 +541,22 @@ impl<'a> ToOwned for GroupInfoView<'a> {
         }
     }
 }
+
+// TODO(RLB): Stub structs below this line
+
+mls_struct! {
+    Dummy + DummyView,
+    dummy: Nil + NilView,
+}
+
+pub type Welcome = Dummy;
+pub type WelcomeView<'a> = DummyView<'a>;
+
+pub type GroupState = Dummy;
+pub type GroupStateView<'a> = DummyView<'a>;
+
+pub type PrivateMessage = Dummy;
+pub type PrivateMessageView<'a> = DummyView<'a>;
 
 #[cfg(test)]
 mod test {
