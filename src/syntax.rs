@@ -358,8 +358,8 @@ impl<const N: usize> TryFrom<&[u8]> for Opaque<N> {
     type Error = Error;
 
     fn try_from(val: &[u8]) -> Result<Self> {
-                let vec = Vec::try_from(val).map_err(|_| Error("Too many values"))?;
-                Ok(Self::from(vec))
+        let vec = Vec::try_from(val).map_err(|_| Error("Too many values"))?;
+        Ok(Self::from(vec))
     }
 }
 
@@ -446,23 +446,18 @@ pub const fn max(array: &[usize]) -> usize {
 
 #[macro_export]
 macro_rules! mls_newtype_opaque {
-    ($owned_type:ident + $view_type:ident, 
-     $inner_owned_type:ident + $inner_view_type:ident, 
-     $size:expr) => {
-        type $inner_owned_type = Opaque<{ $size }>;
-        type $inner_view_type<'a> = OpaqueView<'a, { $size }>;
-
+    ($owned_type:ident + $view_type:ident, $size:expr) => {
         #[derive(Clone, Default, Debug, PartialEq)]
-        pub struct $owned_type($inner_owned_type);
+        pub struct $owned_type(Opaque<{ $size }>);
 
-        impl From<$inner_owned_type> for $owned_type {
-            fn from(val: $inner_owned_type) -> Self {
+        impl From<Opaque<{ $size }>> for $owned_type {
+            fn from(val: Opaque<{ $size }>) -> Self {
                 Self(val)
             }
         }
 
         impl Deref for $owned_type {
-            type Target = $inner_owned_type;
+            type Target = Opaque<{ $size }>;
 
             fn deref(&self) -> &Self::Target {
                 &self.0
@@ -470,16 +465,16 @@ macro_rules! mls_newtype_opaque {
         }
 
         #[derive(Copy, Clone, Debug, PartialEq)]
-        pub struct $view_type<'a>($inner_view_type<'a>);
+        pub struct $view_type<'a>(OpaqueView<'a, { $size }>);
 
-        impl<'a> From<$inner_view_type<'a>> for $view_type<'a> {
-            fn from(val: $inner_view_type<'a>) -> Self {
+        impl<'a> From<OpaqueView<'a, { $size }>> for $view_type<'a> {
+            fn from(val: OpaqueView<'a, { $size }>) -> Self {
                 Self(val)
             }
         }
 
         impl<'a> Deref for $view_type<'a> {
-            type Target = $inner_view_type<'a>;
+            type Target = OpaqueView<'a, { $size }>;
 
             fn deref(&self) -> &Self::Target {
                 &self.0
@@ -487,7 +482,7 @@ macro_rules! mls_newtype_opaque {
         }
 
         impl Serialize for $owned_type {
-            const MAX_SIZE: usize = $inner_owned_type::MAX_SIZE;
+            const MAX_SIZE: usize = Opaque::<{ $size }>::MAX_SIZE;
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
                 self.0.serialize(writer)
@@ -496,7 +491,7 @@ macro_rules! mls_newtype_opaque {
 
         impl<'a> Deserialize<'a> for $view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-                Ok(Self($inner_view_type::deserialize(reader)?))
+                Ok(Self(OpaqueView::deserialize(reader)?))
             }
         }
 
@@ -524,7 +519,7 @@ macro_rules! mls_newtype_opaque {
                 Ok(Self(Opaque::from(vec)))
             }
         }
-        
+
         impl<'a> TryFrom<&'a [u8]> for $view_type<'a> {
             type Error = Error;
 
@@ -694,20 +689,10 @@ mod test {
         test_serde(&0xa0_u8, &0xa0_u8, &hex!("a0"), storage);
 
         let storage = make_storage!(u16);
-        test_serde(
-            &0xa0a1_u16,
-            &0xa0a1_u16,
-            &hex!("a0a1"),
-            storage,
-        );
+        test_serde(&0xa0a1_u16, &0xa0a1_u16, &hex!("a0a1"), storage);
 
         let storage = make_storage!(u32);
-        test_serde(
-            &0xa0a1a2a3_u32,
-            &0xa0a1a2a3_u32,
-            &hex!("a0a1a2a3"),
-            storage,
-        );
+        test_serde(&0xa0a1a2a3_u32, &0xa0a1a2a3_u32, &hex!("a0a1a2a3"), storage);
 
         let storage = make_storage!(u64);
         test_serde(
@@ -746,12 +731,7 @@ mod test {
 
         let serialized = &hex!("14a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0");
 
-        test_serde(
-            &owned,
-            &view,
-            serialized,
-            storage,
-        );
+        test_serde(&owned, &view, serialized, storage);
     }
 
     #[test]
@@ -783,7 +763,7 @@ mod test {
     mls_newtype_primitive! { TestU32 + TestU32View => u32 }
 
     mls_newtype_opaque! {
-        TestOpaque + TestOpaqueView, 
+        TestOpaque + TestOpaqueView,
         TestOpaqueData + TestOpaqueViewData,
         5
     }
@@ -804,7 +784,7 @@ mod test {
         );
 
         let storage = make_storage!(TestOpaque);
-        let opaque = [1_u8,2,3,4,5];
+        let opaque = [1_u8, 2, 3, 4, 5];
 
         test_serde(
             &TestOpaque::try_from(opaque.as_ref()).unwrap(),
@@ -812,7 +792,6 @@ mod test {
             &hex!("050102030405"),
             storage,
         );
-
     }
 
     mls_struct! {

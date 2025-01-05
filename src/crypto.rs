@@ -39,61 +39,51 @@ pub use consts::CIPHER_SUITE;
 
 mls_newtype_opaque! {
     HashOutput + HashOutputView,
-    HashOutputData + HashOutputViewData,
     consts::HASH_OUTPUT_SIZE
 }
 
 mls_newtype_opaque! {
     HpkePrivateKey + HpkePrivateKeyView,
-    HpkePrivateKeyData + HpkePrivateKeyViewData,
     consts::HPKE_PRIVATE_KEY_SIZE
 }
 
 mls_newtype_opaque! {
     HpkePublicKey + HpkePublicKeyView,
-    HpkePublicKeyData + HpkePublicKeyViewData,
     consts::HPKE_PUBLIC_KEY_SIZE
 }
 
 mls_newtype_opaque! {
     HpkeKemOutput + HpkeKemOutputView,
-    HpkeKemOutputData + HpkeKemOutputViewData,
     consts::HPKE_KEM_OUTPUT_SIZE
 }
 
 mls_newtype_opaque! {
     HpkeKemSecret + HpkeKemSecretView,
-    HpkeKemSecretData + HpkeKemSecretViewData,
     consts::HPKE_KEM_SECRET_SIZE
 }
 
 mls_newtype_opaque! {
     SignaturePrivateKey + SignaturePrivateKeyView,
-    SignaturePrivateKeyData + SignaturePrivateKeyViewData,
     consts::SIGNATURE_PRIVATE_KEY_SIZE
 }
 
 mls_newtype_opaque! {
     SignaturePublicKey + SignaturePublicKeyView,
-    SignaturePublicKeyData + SignaturePublicKeyViewData,
     consts::SIGNATURE_PUBLIC_KEY_SIZE
 }
 
 mls_newtype_opaque! {
     Signature + SignatureView,
-    SignatureData + SignatureViewData,
     consts::SIGNATURE_SIZE
 }
 
 mls_newtype_opaque! {
     AeadKey + AeadKeyView,
-    AeadKeyData + AeadKeyViewData,
     consts::SIGNATURE_SIZE
 }
 
 mls_newtype_opaque! {
     AeadNonce + AeadNonceView,
-    AeadNonceData + AeadNonceViewData,
     consts::SIGNATURE_SIZE
 }
 

@@ -138,11 +138,9 @@ macro_rules! mls_signed {
 // A macro to generate AEAD-encrypted data structures
 macro_rules! mls_encrypted {
     ($ct_owned_type:ident + $ct_view_type:ident, 
-     $inner_owned_type:ident + $inner_view_type:ident, 
      $pt_owned_type:ident + $pt_view_type:ident,) => {
         mls_newtype_opaque! {
             $ct_owned_type + $ct_view_type,
-            $inner_owned_type + $inner_view_type,
             { $pt_owned_type::MAX_SIZE + crypto::AEAD_OVERHEAD }
         }
 
@@ -280,7 +278,6 @@ impl<V: ToOwned> ToOwned for Option<V> {
 // Credentials
 mls_newtype_opaque! {
     BasicCredential + BasicCredentialView,
-    BasicCredentialData + BasicCredentialViewData,
     consts::MAX_CREDENTIAL_SIZE
 }
 
@@ -354,7 +351,6 @@ impl Default for LeafNodeSource {
 // Extensions
 mls_newtype_opaque! {
     ExtensionData + ExtensionDataView,
-    ExtensionDataData + ExtensionDataViewData,
     consts::MAX_EXTENSION_SIZE
 }
 
@@ -407,7 +403,6 @@ mls_signed! { KeyPackage + KeyPackageView + b"KeyPackageTBS" => KeyPackageTbs + 
 // GroupInfo
 mls_newtype_opaque! {
     GroupId + GroupIdView,
-    GroupIdData + GroupIdViewData,
     consts::MAX_GROUP_ID_SIZE
 }
 
@@ -477,7 +472,6 @@ mls_struct! {
 
 mls_encrypted! {
     AeadEncryptedGroupSecrets + AeadEncryptedGroupSecretsView,
-    AeadEncryptedGroupSecretsData + AeadEncryptedGroupSecretsViewData,
     GroupSecrets + GroupSecretsView,
 }
 
@@ -498,7 +492,6 @@ type EncryptedGroupSecretsListView<'a> = Vec<EncryptedGroupSecretsView<'a>, { co
 
 mls_encrypted! {
     EncryptedGroupInfo + EncryptedGroupInfoView,
-    EncryptedGroupInfoData + EncryptedGroupInfoViewData,
     GroupInfo + GroupInfoView,
 }
 
