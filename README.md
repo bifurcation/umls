@@ -17,7 +17,7 @@ minimal resource requirements.
 * Non-owning message parsing
 * Crypto provider interface to allow the use of platform crypto libraries
 
-To make this possible, we impose a few constraints at run time:
+To make this possible, we impose a few constraints at run time, for example:
 
 * Maximum number of members in a group
 * Maximum number of proposals per commit
@@ -25,9 +25,7 @@ To make this possible, we impose a few constraints at run time:
 * Only Basic credentials are supported
 * No extensions are supported
 
-# TODO
-
-* Quickstart / Programming overview
-
+Nonetheless, this library should interoperate with other MLS libraries in
+scenarios that obey those constraints.
 
 [Messaging Layer Security]: https://messaginglayersecurity.rocks/
