@@ -35,7 +35,6 @@ pub mod consts {
 mls_newtype_primitive! { CipherSuite + CipherSuiteView => u16 }
 
 pub use consts::AEAD_OVERHEAD;
-pub use consts::CIPHER_SUITE;
 
 mls_newtype_opaque! {
     HashOutput + HashOutputView,
@@ -126,12 +125,6 @@ pub fn generate_sig(
     Ok((signature_priv, signature_key))
 }
 
-/*
-struct {
-    opaque label<V>;
-    opaque content<V>;
-} SignContent;
-*/
 fn signature_digest(message: &[u8], label: &[u8]) -> Result<HashOutput> {
     let mut h = Hash::new();
 
@@ -215,5 +208,12 @@ pub fn aead_open(
     nonce: AeadNonce,
     aad: &[u8],
 ) -> Result<usize> {
+    todo!();
+}
+
+pub fn sender_data_key_nonce(
+    sender_data_secret: HashOutputView,
+    ciphertext: &[u8],
+) -> (AeadKey, AeadNonce) {
     todo!();
 }

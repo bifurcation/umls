@@ -21,6 +21,15 @@ macro_rules! make_storage {
     };
 }
 
+#[macro_export]
+macro_rules! serialize {
+    ($t:ty, $val:expr) => {{
+        let mut buf = make_storage!($t);
+        $val.serialize(&mut buf)?;
+        buf
+    }};
+}
+
 pub trait Deserialize<'a>: Sized {
     /// Deserialize the provided object from the stream.  This should usually be done with "view"
     /// or reference types, via the [ReadRef] trait.
@@ -397,6 +406,15 @@ impl<const N: usize> Serialize for Opaque<N> {
     }
 }
 
+impl<'a, const N: usize> Serialize for OpaqueView<'a, N> {
+    const MAX_SIZE: usize = Varint::size(N) + N;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        Varint(self.0.len()).serialize(writer)?;
+        writer.write(self.0)
+    }
+}
+
 impl<'a, const N: usize> Deserialize<'a> for OpaqueView<'a, N> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
         let len = Varint::deserialize(reader)?;
@@ -489,6 +507,14 @@ macro_rules! mls_newtype_opaque {
             }
         }
 
+        impl<'a> Serialize for $view_type<'a> {
+            const MAX_SIZE: usize = Opaque::<{ $size }>::MAX_SIZE;
+
+            fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                self.0.serialize(writer)
+            }
+        }
+
         impl<'a> Deserialize<'a> for $view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
                 Ok(Self(OpaqueView::deserialize(reader)?))
@@ -537,16 +563,11 @@ macro_rules! mls_newtype_opaque {
 }
 
 #[macro_export]
-macro_rules! mls_struct {
-    ($owned_type:ident + $view_type:ident, $($field_name:ident: $field_type:ident + $field_view_type:ident,)*) => {
+macro_rules! mls_struct_serialize {
+    ($owned_type:ident, $($field_name:ident: $field_type:ident,)*) => {
         #[derive(Clone, Default, Debug, PartialEq)]
         pub struct $owned_type {
             $($field_name: $field_type,)*
-        }
-
-        #[derive(Clone, Debug, PartialEq)]
-        pub struct $view_type<'a> {
-            $($field_name: $field_view_type<'a>,)*
         }
 
         impl Serialize for $owned_type {
@@ -556,6 +577,21 @@ macro_rules! mls_struct {
                 $(self.$field_name.serialize(writer)?;)*
                 Ok(())
             }
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! mls_struct {
+    ($owned_type:ident + $view_type:ident, $($field_name:ident: $field_type:ident + $field_view_type:ident,)*) => {
+        mls_struct_serialize!{
+            $owned_type,
+            $($field_name: $field_type,)*
+        }
+
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct $view_type<'a> {
+            $($field_name: $field_view_type<'a>,)*
         }
 
         impl<'a> Deserialize<'a> for $view_type<'a> {
