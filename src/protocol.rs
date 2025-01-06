@@ -836,39 +836,6 @@ trait SenderKeySource {
     ) -> Option<(AeadKey, AeadNonce)>;
 }
 
-// SignedFramedContent::new(...)
-//
-// // Update transcript
-//
-// (SignedFramedContent, confirmation_tag, key, nonce, sender_data_secret)
-// -> PrivateMessage
-//
-// =====
-//
-//
-
-// * Form FramedContent
-// * Sign FramedContent
-// * Update transcript hash => confirmation_tag
-//
-// * Form payload
-// * Encrypt payload
-//
-// * Form sender data
-// * Encrypt sender data with SenderDataAAD
-
-// TODO(RLB): Keep building toward PrivateMessage
-
-// TODO(RLB): Stub structs below this line
-
-mls_struct! {
-    Dummy + DummyView,
-    dummy: Nil + NilView,
-}
-
-pub type GroupState = Dummy;
-pub type GroupStateView<'a> = DummyView<'a>;
-
 #[cfg(test)]
 mod test {
     use super::*;

@@ -4,12 +4,14 @@
 
 mod common;
 mod crypto;
+mod group_state;
 mod io;
 mod protocol;
 mod syntax;
 
 use common::*;
 use crypto::*;
+use group_state::*;
 use protocol::*;
 
 pub fn make_key_package(
