@@ -482,6 +482,12 @@ macro_rules! mls_newtype_opaque {
             }
         }
 
+        impl DerefMut for $owned_type {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
+
         #[derive(Copy, Clone, Debug, PartialEq)]
         pub struct $view_type<'a>(OpaqueView<'a, { $size }>);
 

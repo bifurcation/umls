@@ -110,6 +110,22 @@ impl Write for Hash {
     }
 }
 
+pub fn extract(salt: HashOutputView, ikm: HashOutputView) -> HashOutput {
+    todo!()
+}
+
+pub fn expand_with_label(
+    secret: HashOutputView,
+    label: &'static [u8],
+    context: &[u8],
+) -> HashOutput {
+    todo!()
+}
+
+pub fn derive_secret(secret: HashOutputView, label: &'static [u8]) -> HashOutput {
+    todo!()
+}
+
 pub fn generate_sig(
     rng: &mut impl CryptoRngCore,
 ) -> Result<(SignaturePrivateKey, SignaturePublicKey)> {
