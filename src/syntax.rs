@@ -833,11 +833,7 @@ mod test {
     mls_newtype_primitive! { TestU16 + TestU16View => u16 }
     mls_newtype_primitive! { TestU32 + TestU32View => u32 }
 
-    mls_newtype_opaque! {
-        TestOpaque + TestOpaqueView,
-        TestOpaqueData + TestOpaqueViewData,
-        5
-    }
+    mls_newtype_opaque! { TestOpaque + TestOpaqueView, 5 }
 
     #[test]
     fn mls_newtype() {

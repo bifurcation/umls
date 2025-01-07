@@ -898,8 +898,7 @@ mod test {
             let mut reader = SliceReader::new(&storage);
             let view = $signed_view_type::deserialize(&mut reader).unwrap();
 
-            let ver = view.verify(signature_key.as_view()).unwrap();
-            assert!(ver);
+            view.verify(signature_key.as_view()).unwrap();
         };
     }
 
