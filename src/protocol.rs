@@ -429,7 +429,8 @@ mls_struct! {
 mls_struct! {
     KeyPackagePriv + KeyPackagePrivView,
     init_priv: HpkePrivateKey + HpkePrivateKeyView,
-    leaf_node_priv: LeafNodePriv + LeafNodePrivView,
+    encryption_priv: HpkePrivateKey + HpkePrivateKeyView,
+    signature_priv: SignaturePrivateKey + SignaturePrivateKeyView,
 }
 
 mls_signed! { KeyPackage + KeyPackageView + b"KeyPackageTBS" => KeyPackageTbs + KeyPackageTbsView }

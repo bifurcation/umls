@@ -25,19 +25,63 @@ use rand::Rng;
 use rand_core::CryptoRngCore;
 
 pub fn make_key_package(
-    _signature_priv: SignaturePrivateKey,
-    _signature_key: SignaturePublicKey,
-    _credential: Credential,
+    rng: &mut (impl Rng + CryptoRngCore),
+    signature_priv: SignaturePrivateKey,
+    signature_key: SignaturePublicKey,
+    credential: Credential,
 ) -> Result<(KeyPackagePriv, KeyPackage)> {
-    // Trivial
-    todo!();
+    let (encryption_priv, encryption_key) = crypto::generate_hpke(rng)?;
+    let (init_priv, init_key) = crypto::generate_hpke(rng)?;
+
+    // Form the leaf node
+    let leaf_node_tbs = LeafNodeTbs {
+        encryption_key,
+        signature_key,
+        credential,
+        capabilities: Capabilities {
+            versions: [protocol::consts::SUPPORTED_VERSION]
+                .as_ref()
+                .try_into()
+                .unwrap(),
+            cipher_suites: [crypto::consts::CIPHER_SUITE].as_ref().try_into().unwrap(),
+            credentials: [protocol::consts::SUPPORTED_CREDENTIAL_TYPE]
+                .as_ref()
+                .try_into()
+                .unwrap(),
+            ..Default::default()
+        },
+        leaf_node_source: Default::default(),
+        extensions: Default::default(),
+    };
+
+    let leaf_node = LeafNode::new(leaf_node_tbs, signature_priv.as_view())?;
+
+    // Form the key package
+    let key_package_tbs = KeyPackageTbs {
+        protocol_version: protocol::consts::SUPPORTED_VERSION,
+        cipher_suite: crypto::consts::CIPHER_SUITE,
+        init_key,
+        leaf_node,
+        extensions: Default::default(),
+    };
+
+    let key_package = KeyPackage::new(key_package_tbs, signature_priv.as_view())?;
+
+    // Form the private state
+    let key_package_priv = KeyPackagePriv {
+        init_priv,
+        encryption_priv,
+        signature_priv,
+    };
+
+    Ok((key_package_priv, key_package))
 }
 
 pub fn create_group(
     _key_package_priv: KeyPackagePrivView,
     _key_package: KeyPackageView,
 ) -> Result<GroupState> {
-    // Trivial once we know what's in a group
+    // Trivial once we know what's in a group state
     todo!();
 }
 
