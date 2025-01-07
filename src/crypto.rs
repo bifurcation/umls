@@ -340,28 +340,155 @@ pub fn generate_hpke(rng: &mut impl CryptoRngCore) -> Result<(HpkePrivateKey, Hp
     let raw_priv = StaticSecret::random_from_rng(rng);
     let raw_pub = PublicKey::from(&raw_priv);
 
-    let priv_bytes = raw_priv.to_bytes();
-    let pub_bytes = raw_pub.to_bytes();
-
-    let hpke_priv = HpkePrivateKey::try_from(priv_bytes.as_slice()).unwrap();
-    let hpke_key = HpkePublicKey::try_from(pub_bytes.as_slice()).unwrap();
+    let hpke_priv = HpkePrivateKey::try_from(raw_priv.as_bytes().as_ref()).unwrap();
+    let hpke_key = HpkePublicKey::try_from(raw_pub.as_bytes().as_ref()).unwrap();
 
     Ok((hpke_priv, hpke_key))
 }
 
-pub fn hpke_encap(encryption_key: HpkePublicKeyView) -> (HpkeKemOutput, HpkeKemSecret) {
-    todo!();
+mod hpke {
+    use super::*;
+
+    // 0x0020 = DHKEM(X25519, HKDF-SHA256)
+    const KEM_SUITE_ID: &[u8] = b"KEM\x00\x20";
+
+    // suite_id = concat("HPKE", kem_id, kdf_id, aead_id)
+    // kem_id  = 0x0020 = DHKEM(X25519, HKDF-SHA256)
+    // kdf_id  = 0x0001 = HKDF-SHA256
+    // aead_id = 0x0001 = AES-128-GCM
+    const FULL_SUITE_ID: &[u8] = b"HPKE\x00\x20\x00\x01\x00\x01";
+
+    fn labeled_extract(
+        suite_id: &'static [u8],
+        salt: &[u8],
+        label: &[u8],
+        ikm: &[u8],
+    ) -> HashOutput {
+        let mut h = Hmac::new(salt);
+
+        h.write(b"HPKE-v1").unwrap();
+        h.write(suite_id).unwrap();
+        h.write(label).unwrap();
+        h.write(ikm).unwrap();
+
+        h.finalize()
+    }
+
+    fn labeled_expand(
+        suite_id: &'static [u8],
+        prk: &[u8],
+        label: &[u8],
+        info: &[u8],
+        len: usize,
+    ) -> HashOutput {
+        let mut h = Hmac::new(prk);
+
+        h.write(&len.to_be_bytes()).unwrap();
+        h.write(b"HPKE-v1").unwrap();
+        h.write(suite_id).unwrap();
+        h.write(label).unwrap();
+        h.write(info).unwrap();
+
+        let mut out = h.finalize();
+        out.0 .0.resize_default(len as usize).unwrap();
+        out
+    }
+
+    pub fn extract_and_expand(dh: &[u8], kem_context: &[u8]) -> HashOutput {
+        let eae_prk = labeled_extract(KEM_SUITE_ID, b"", b"eae_prk", dh);
+        labeled_expand(
+            KEM_SUITE_ID,
+            eae_prk.as_ref(),
+            b"shared_secret",
+            kem_context,
+            consts::HASH_OUTPUT_SIZE,
+        )
+    }
+
+    pub fn key_schedule(secret: &[u8]) -> (AeadKey, AeadNonce) {
+        const MODE_BASE: u8 = 0x00;
+
+        let psk_id_hash = labeled_extract(FULL_SUITE_ID, b"", b"psk_id_hash", &[]);
+        let info_hash = labeled_extract(FULL_SUITE_ID, b"", b"info_hash", &[]);
+
+        let mut key_schedule_context: Vec<u8, 65> = Vec::new();
+        key_schedule_context.push(MODE_BASE).unwrap();
+        key_schedule_context
+            .extend_from_slice(psk_id_hash.as_ref())
+            .unwrap();
+        key_schedule_context
+            .extend_from_slice(info_hash.as_ref())
+            .unwrap();
+
+        let key_data = labeled_expand(
+            FULL_SUITE_ID,
+            secret,
+            b"key",
+            &key_schedule_context,
+            consts::AEAD_KEY_SIZE,
+        );
+        let nonce_data = labeled_expand(
+            FULL_SUITE_ID,
+            secret,
+            b"key",
+            &key_schedule_context,
+            consts::AEAD_NONCE_SIZE,
+        );
+
+        let key = AeadKey(Opaque(key_data.as_ref().try_into().unwrap()));
+        let nonce = AeadNonce(Opaque(nonce_data.as_ref().try_into().unwrap()));
+
+        (key, nonce)
+    }
+}
+
+pub fn hpke_encap(
+    rng: &mut impl CryptoRngCore,
+    encryption_key: HpkePublicKeyView,
+) -> (HpkeKemOutput, HpkeKemSecret) {
+    let pk_r_m: [u8; 32] = encryption_key.as_ref().try_into().unwrap();
+    let pk_r = PublicKey::from(pk_r_m);
+
+    let sk_e = StaticSecret::random_from_rng(rng);
+    let enc = PublicKey::from(&sk_e);
+
+    let dh = sk_e.diffie_hellman(&pk_r);
+
+    let mut kem_context: Vec<u8, 64> = Vec::new();
+    kem_context.extend_from_slice(enc.as_bytes()).unwrap();
+    kem_context.extend_from_slice(&pk_r_m).unwrap();
+
+    let shared_secret = hpke::extract_and_expand(dh.as_bytes(), kem_context.as_ref());
+
+    let enc = HpkeKemOutput::try_from(enc.as_bytes().as_ref()).unwrap();
+    let shared_secret = HpkeKemSecret::try_from(shared_secret.as_ref()).unwrap();
+    (enc, shared_secret)
 }
 
 pub fn hpke_decap(
     encryption_priv: HpkePrivateKeyView,
     kem_output: HpkeKemOutputView,
 ) -> HpkeKemSecret {
-    todo!();
+    let sk_r_m: [u8; 32] = encryption_priv.as_ref().try_into().unwrap();
+    let sk_r = StaticSecret::from(sk_r_m);
+    let pk_r = PublicKey::from(&sk_r);
+    let pk_r_m = pk_r.as_bytes().as_ref();
+
+    let pk_e_m: [u8; 32] = kem_output.as_ref().try_into().unwrap();
+    let pk_e = PublicKey::from(pk_e_m);
+
+    let dh = sk_r.diffie_hellman(&pk_e);
+
+    let mut kem_context: Vec<u8, 64> = Vec::new();
+    kem_context.extend_from_slice(kem_output.as_ref()).unwrap();
+    kem_context.extend_from_slice(&pk_r_m).unwrap();
+
+    let shared_secret = hpke::extract_and_expand(dh.as_bytes(), kem_context.as_ref());
+    HpkeKemSecret::try_from(shared_secret.as_ref()).unwrap()
 }
 
 pub fn hpke_key_nonce(secret: HpkeKemSecret) -> (AeadKey, AeadNonce) {
-    todo!();
+    hpke::key_schedule(secret.as_ref())
 }
 
 pub fn aead_seal<const N: usize>(

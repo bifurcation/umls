@@ -10,6 +10,7 @@ use crate::{
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use heapless::Vec;
+use rand_core::CryptoRngCore;
 
 pub mod consts {
     use super::{CredentialType, ExtensionType, ProtocolVersion, WireFormat};
@@ -228,11 +229,12 @@ macro_rules! mls_hpke_encrypted {
 
         impl $hpke_owned_type {
             pub fn seal(
+                rng: &mut impl CryptoRngCore,
                 plaintext: $pt_owned_type,
                 encryption_key: HpkePublicKeyView,
                 aad: &[u8],
             ) -> Result<Self> {
-                let (kem_output, kem_secret) = crypto::hpke_encap(encryption_key);
+                let (kem_output, kem_secret) = crypto::hpke_encap(rng, encryption_key);
                 let (key, nonce) = crypto::hpke_key_nonce(kem_secret);
 
                 let ciphertext = $ct_owned_type::seal(plaintext, key, nonce, aad)?;

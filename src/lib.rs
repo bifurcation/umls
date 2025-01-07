@@ -22,6 +22,7 @@ use treekem::*;
 
 use heapless::Vec;
 use rand::Rng;
+use rand_core::CryptoRngCore;
 
 pub fn make_key_package(
     _signature_priv: SignaturePrivateKey,
@@ -70,7 +71,7 @@ pub fn join_group(
 }
 
 pub fn add_member(
-    rng: &mut impl Rng,
+    rng: &mut (impl Rng + CryptoRngCore),
     group_state: GroupStateView,
     key_package: KeyPackageView,
 ) -> Result<(GroupState, PrivateMessage, Welcome)> {
@@ -162,7 +163,7 @@ pub fn add_member(
     };
 
     let encrypted_group_secrets =
-        HpkeEncryptedGroupSecrets::seal(group_secrets, key_package.init_key, &[])?;
+        HpkeEncryptedGroupSecrets::seal(rng, group_secrets, key_package.init_key, &[])?;
     let new_member = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package.to_owned())?;
     let encrypted_group_secrets = EncryptedGroupSecrets {
         new_member,
