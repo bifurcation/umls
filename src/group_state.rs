@@ -14,7 +14,7 @@ mls_struct! {
     ratchet_tree: RatchetTree + RatchetTreeView,
     group_context: GroupContext + GroupContextView,
     interim_transcript_hash: HashOutput + HashOutputView,
-    init_secret: InitSecret + InitSecretView,
+    epoch_secret: EpochSecret + EpochSecretView,
 
     // Local state
     my_index: LeafIndex + LeafIndexView,

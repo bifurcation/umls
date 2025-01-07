@@ -108,18 +108,19 @@ impl<'a> EpochSecretView<'a> {
         self,
         commit_secret: HashOutputView,
         group_context: &GroupContext,
-    ) -> Result<(EpochSecret, JoinerSecret, WelcomeSecret)> {
+    ) -> Result<(EpochSecret, JoinerSecret, AeadKey, AeadNonce)> {
         let group_context = serialize!(GroupContext, group_context);
 
         let joiner_secret = JoinerSecret::new(self, commit_secret, &group_context);
         let member_secret = joiner_secret.as_view().advance();
-        let welcome_secret = member_secret.as_view().welcome_secret();
-        let epoch_secret = member_secret.as_view().advance(&group_context);
+        let (welcome_key, welcome_nonce) = member_secret.welcome_key_nonce();
+        let epoch_secret = member_secret.advance(&group_context);
 
         Ok((
             epoch_secret.into(),
             joiner_secret.into(),
-            welcome_secret.into(),
+            welcome_key,
+            welcome_nonce,
         ))
     }
 }
@@ -162,7 +163,7 @@ impl EpochSecret {
 }
 
 impl JoinerSecret {
-    fn new(
+    pub fn new(
         epoch_secret: EpochSecretView,
         commit_secret: HashOutputView,
         group_context: &[u8],
@@ -174,24 +175,19 @@ impl JoinerSecret {
 }
 
 impl<'a> JoinerSecretView<'a> {
-    fn advance(self) -> MemberSecret {
+    pub fn advance(self) -> MemberSecret {
         let psk_secret = HashOutput::zero();
         crypto::extract(self.into(), psk_secret.as_view()).into()
     }
 }
 
-impl<'a> WelcomeSecretView<'a> {
-    pub fn into_key_nonce(self) -> (AeadKey, AeadNonce) {
-        crypto::welcome_key_nonce(HashOutputView::from(self.0)).into()
-    }
-}
-
-impl<'a> MemberSecretView<'a> {
-    fn welcome_secret(&self) -> WelcomeSecret {
-        crypto::derive_secret(self.clone().into(), b"welcome").into()
+impl MemberSecret {
+    pub fn welcome_key_nonce(&self) -> (AeadKey, AeadNonce) {
+        let welcome_secret = crypto::derive_secret(self.as_view().into(), b"welcome");
+        crypto::welcome_key_nonce(welcome_secret.as_view())
     }
 
-    fn advance(self, group_context: &[u8]) -> EpochSecret {
-        crypto::expand_with_label(self.into(), b"epoch", &group_context).into()
+    pub fn advance(&self, group_context: &[u8]) -> EpochSecret {
+        crypto::expand_with_label(self.as_view().into(), b"epoch", &group_context).into()
     }
 }

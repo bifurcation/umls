@@ -474,6 +474,12 @@ macro_rules! mls_newtype_opaque {
             }
         }
 
+        impl From<$owned_type> for Opaque<{ $size }> {
+            fn from(val: $owned_type) -> Self {
+                val.0
+            }
+        }
+
         impl Deref for $owned_type {
             type Target = Opaque<{ $size }>;
 
@@ -494,6 +500,12 @@ macro_rules! mls_newtype_opaque {
         impl<'a> From<OpaqueView<'a, { $size }>> for $view_type<'a> {
             fn from(val: OpaqueView<'a, { $size }>) -> Self {
                 Self(val)
+            }
+        }
+
+        impl<'a> From<$view_type<'a>> for OpaqueView<'a, { $size }> {
+            fn from(val: $view_type<'a>) -> Self {
+                val.0
             }
         }
 

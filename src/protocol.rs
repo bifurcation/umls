@@ -1,6 +1,7 @@
 use crate::common::*;
 use crate::crypto::{self, *};
 use crate::io::*;
+use crate::key_schedule::*;
 use crate::syntax::*;
 use crate::{
     make_storage, mls_enum, mls_newtype_opaque, mls_newtype_primitive, mls_struct,
@@ -494,7 +495,7 @@ type PreSharedKeyIDListView<'a> = Vec<NilView<'a>, { consts::MAX_WELCOME_PSKS }>
 
 mls_struct! {
     GroupSecrets + GroupSecretsView,
-    joiner_secret: HashOutput + HashOutputView,
+    joiner_secret: JoinerSecret + JoinerSecretView,
     path_secret: OptionalPathSecret + OptionalPathSecretView,
     psks: PreSharedKeyIDList + PreSharedKeyIDListView,
 }

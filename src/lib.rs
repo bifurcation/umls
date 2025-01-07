@@ -16,6 +16,7 @@ mod treekem;
 use common::*;
 use crypto::*;
 use group_state::*;
+use io::*;
 use protocol::*;
 use syntax::*;
 use treekem::*;
@@ -86,32 +87,84 @@ pub fn create_group(
 }
 
 pub fn join_group(
-    _key_package_priv: KeyPackagePrivView,
-    _key_package: KeyPackageView,
+    key_package_priv: KeyPackagePrivView,
+    key_package: KeyPackageView,
     welcome: WelcomeView,
 ) -> Result<GroupState> {
-    // Verify that the Welcome is for us, then decrypt it
+    // Verify that the Welcome is for us
+    let kp_ref = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package.to_owned())?;
+    if welcome.secrets[0].new_member != kp_ref.as_view() {
+        return Err(Error("Misdirected Welcome"));
+    }
 
     // Decrypt the Group Secrets
+    let group_secrets_data = welcome.secrets[0]
+        .encrypted_group_secrets
+        .open(key_package_priv.init_priv, &[])?;
+    let mut group_secrets_reader = SliceReader::new(&group_secrets_data);
+    let group_secrets = GroupSecretsView::deserialize(&mut group_secrets_reader)?;
+
+    if !group_secrets.psks.is_empty() {
+        return Err(Error("Not implemented"));
+    }
 
     // Decrypt the GroupInfo
+    let member_secret = group_secrets.joiner_secret.advance();
+    let (welcome_key, welcome_nonce) = member_secret.welcome_key_nonce();
+
+    let group_info_data = welcome
+        .encrypted_group_info
+        .open(welcome_key, welcome_nonce, &[])?;
+    let mut group_info_reader = SliceReader::new(&group_info_data);
+    let group_info = GroupInfoView::deserialize(&mut group_info_reader)?;
 
     // Extract the ratchet tree from an extension
+    let ratchet_tree_extension = group_info
+        .extensions
+        .iter()
+        .find(|ext| ext.extension_type.to_owned() == protocol::consts::EXTENSION_TYPE_RATCHET_TREE);
 
-    // Verify the signature on the GroupInfo
-
-    // Import the data into a GroupState
-    let group_state = GroupState {
-        // ratchet_tree, // parsed from GroupInfo extension
-        // group_context, // copied from GroupInfo
-        // interim_transcript_hash, // Computed from confirmed + confirmation_tag
-        // init_secret, // Computed from joiner_secret
-        // my_index, // Looked up in tree
-        // my_signature_priv, // Copied from key_package_priv
-        ..Default::default()
+    let Some(ratchet_tree_extension) = ratchet_tree_extension else {
+        return Err(Error("Not implemented"));
     };
 
-    todo!();
+    let ratchet_tree_data = ratchet_tree_extension.extension_data;
+    let mut ratchet_tree_reader = SliceReader::new(ratchet_tree_data.as_ref());
+    let ratchet_tree = RatchetTreeView::deserialize(&mut ratchet_tree_reader)?;
+
+    // Find our own leaf in the ratchet tree
+    let Some(my_index) = ratchet_tree.find(key_package.leaf_node.clone()) else {
+        return Err(Error("Joiner not present in tree"));
+    };
+
+    // Verify the signature on the GroupInfo
+    let Some(signer_leaf) = ratchet_tree.leaf_node_at(group_info.signer.to_owned()) else {
+        return Err(Error("GroupInfo signer not present in tree"));
+    };
+
+    group_info.verify(signer_leaf.signature_key)?;
+
+    // Update the key schedule
+    let group_context = group_info.group_context.to_owned();
+    let group_context_bytes = serialize!(GroupContext, group_context);
+    let epoch_secret = member_secret.advance(&group_context_bytes);
+
+    let confirmation_tag = epoch_secret.confirmation_tag(&group_context.confirmed_transcript_hash);
+    let interim_transcript_hash = transcript_hash::interim(
+        group_context.confirmed_transcript_hash.as_view(),
+        &confirmation_tag,
+    )?;
+
+    // Import the data into a GroupState
+    Ok(GroupState {
+        ratchet_tree: ratchet_tree.to_owned(),
+        group_context,
+        interim_transcript_hash,
+        epoch_secret,
+        my_index,
+        my_signature_priv: key_package_priv.signature_priv.to_owned(),
+        ..Default::default()
+    })
 }
 
 pub fn add_member(
@@ -163,7 +216,7 @@ pub fn add_member(
     // Update the GroupContext
     next.group_context.epoch.0 += 1;
     next.group_context.tree_hash = next.ratchet_tree.root_hash();
-    next.group_context.confirmed_transcript_hash = transcript_hash::update_confirmed(
+    next.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
         group_state.interim_transcript_hash,
         &signed_framed_content.content,
         &signed_framed_content.signature,
@@ -171,17 +224,19 @@ pub fn add_member(
 
     // Ratchet forward the key schedule
     let commit_secret = HashOutput::zero();
-    let (init_secret, key_schedule_epoch) = group_state
-        .init_secret
+    let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = group_state
+        .epoch_secret
         .advance(commit_secret.as_view(), &next.group_context)?;
 
-    next.init_secret = init_secret;
+    next.epoch_secret = epoch_secret;
 
     // Form the PrivateMessage
-    let confirmation_tag =
-        key_schedule_epoch.confirmation_tag(&next.group_context.confirmed_transcript_hash);
-    let (generation, key, nonce) =
-        key_schedule_epoch.handshake_key(next.my_index, next.ratchet_tree.size());
+    let confirmation_tag = next
+        .epoch_secret
+        .confirmation_tag(&next.group_context.confirmed_transcript_hash);
+    let (generation, key, nonce) = next
+        .epoch_secret
+        .handshake_key(next.my_index, next.ratchet_tree.size());
 
     let sender_data = SenderData {
         leaf_index: next.my_index,
@@ -195,13 +250,13 @@ pub fn add_member(
         sender_data,
         key,
         nonce,
-        key_schedule_epoch.sender_data_secret().as_view(),
+        next.epoch_secret.sender_data_secret().as_view(),
         authenticated_data,
     )?;
 
     // Form the Welcome
     let group_secrets = GroupSecrets {
-        joiner_secret: key_schedule_epoch.joiner_secret,
+        joiner_secret,
         path_secret: None,
         psks: Default::default(),
     };
@@ -231,8 +286,6 @@ pub fn add_member(
     };
 
     let group_info = GroupInfo::new(group_info_tbs, next.my_signature_priv.as_view())?;
-    let (welcome_key, welcome_nonce) =
-        crypto::welcome_key_nonce(key_schedule_epoch.welcome_secret.as_view());
     let encrypted_group_info =
         EncryptedGroupInfo::seal(group_info, welcome_key, welcome_nonce, &[])?;
 
