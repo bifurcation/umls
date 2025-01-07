@@ -92,7 +92,54 @@ impl RatchetTree {
     }
 
     pub fn root_hash(&self) -> HashOutput {
-        todo!();
+        self.hash(root(self.nodes.len()))
+    }
+
+    fn hash(&self, index: usize) -> HashOutput {
+        if level(index) == 0 {
+            self.leaf_hash(index)
+        } else {
+            self.parent_hash(index)
+        }
+    }
+
+    fn leaf_hash(&self, index: usize) -> HashOutput {
+        // struct {
+        //     uint32 leaf_index;
+        //     optional<LeafNode> leaf_node;
+        // } LeafNodeHashInput;
+        let mut h = Hash::new();
+
+        let leaf_index = (index / 2) as u32;
+        leaf_index.serialize(&mut h).unwrap();
+
+        let optional_leaf = self.nodes[index].as_ref().and_then(|node| match node {
+            Node::Leaf(leaf_node) => Some(leaf_node),
+            Node::Parent(_) => unreachable!(),
+        });
+        optional_leaf.serialize(&mut h).unwrap();
+
+        h.finalize()
+    }
+
+    fn parent_hash(&self, index: usize) -> HashOutput {
+        // struct {
+        //     optional<ParentNode> parent_node;
+        //     opaque left_hash<V>;
+        //     opaque right_hash<V>;
+        // } ParentNodeHashInput;
+        let mut h = Hash::new();
+
+        let optional_parent = self.nodes[index].as_ref().and_then(|node| match node {
+            Node::Leaf(_) => unreachable!(),
+            Node::Parent(parent_node) => Some(parent_node),
+        });
+        optional_parent.serialize(&mut h).unwrap();
+
+        self.hash(left(index).unwrap()).serialize(&mut h).unwrap();
+        self.hash(right(index).unwrap()).serialize(&mut h).unwrap();
+
+        h.finalize()
     }
 
     fn expand(&mut self) -> Result<()> {

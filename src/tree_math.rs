@@ -20,6 +20,16 @@ pub fn parent(index: usize, width: usize) -> Option<usize> {
     }
 }
 
+pub fn left(index: usize) -> Option<usize> {
+    let k = level(index);
+    (k != 0).then_some(index ^ (0b01 << (k - 1)))
+}
+
+pub fn right(index: usize) -> Option<usize> {
+    let k = level(index);
+    (k != 0).then_some(index ^ (0b11 << (k - 1)))
+}
+
 pub fn step_towards(parent: usize, leaf: usize) -> Option<usize> {
     let k = level(parent);
 

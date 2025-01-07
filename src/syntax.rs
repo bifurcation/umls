@@ -30,6 +30,17 @@ macro_rules! serialize {
     }};
 }
 
+impl<T> Serialize for &T
+where
+    T: Serialize,
+{
+    const MAX_SIZE: usize = T::MAX_SIZE;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        (**self).serialize(writer)
+    }
+}
+
 pub trait Deserialize<'a>: Sized {
     /// Deserialize the provided object from the stream.  This should usually be done with "view"
     /// or reference types, via the [ReadRef] trait.
