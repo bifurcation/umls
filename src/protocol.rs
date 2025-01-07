@@ -11,8 +11,11 @@ use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use heapless::Vec;
 
-mod consts {
-    use super::{CredentialType, ProtocolVersion, WireFormat};
+pub mod consts {
+    use super::{CredentialType, ExtensionType, ProtocolVersion, WireFormat};
+
+    use crate::syntax::Serialize;
+    use crate::treekem::RatchetTree;
 
     pub const SUPPORTED_VERSION: ProtocolVersion = ProtocolVersion(0x0001); // mls10
     pub const SUPPORTED_CREDENTIAL_TYPE: CredentialType = CredentialType(0x0001); // basic
@@ -28,10 +31,16 @@ mod consts {
     pub const MAX_EXTENSIONS: usize = 0;
     pub const MAX_GROUP_ID_SIZE: usize = 16;
     pub const MAX_WELCOME_PSKS: usize = 0;
+    pub const MAX_GROUP_INFO_EXTENSIONS: usize = 1;
+    pub const MAX_GROUP_INFO_EXTENSION_SIZE: usize = RatchetTree::MAX_SIZE;
     pub const MAX_JOINERS_PER_WELCOME: usize = 1;
     pub const MAX_PRIVATE_MESSAGE_AAD_SIZE: usize = 0;
     pub const MAX_PROPOSALS_PER_COMMIT: usize = 1;
-    pub const MAX_UPDATE_PATH_LENGTH: usize = 2; // TODO(RLB) log2(MAX_GROUP_SIZE)
+
+    pub const MAX_GROUP_SIZE: usize = 2;
+    pub const MAX_UPDATE_PATH_LENGTH: usize = (MAX_GROUP_SIZE.ilog2() as usize) + 1;
+
+    pub const EXTENSION_TYPE_RATCHET_TREE: ExtensionType = ExtensionType(0x0002);
 }
 
 // A macro to generate signed data structures
@@ -40,38 +49,36 @@ macro_rules! mls_signed {
      $val_owned_type:ident + $val_view_type:ident) => {
         #[derive(Clone, Default, Debug, PartialEq)]
         pub struct $signed_owned_type {
-            to_be_signed: $val_owned_type,
-            to_be_signed_raw: Vec<u8, { <$val_owned_type>::MAX_SIZE }>,
-            signature: Signature,
+            pub tbs: $val_owned_type,
+            tbs_raw: Vec<u8, { <$val_owned_type>::MAX_SIZE }>,
+            pub signature: Signature,
         }
 
         #[derive(Clone, Debug, PartialEq)]
         pub struct $signed_view_type<'a> {
-            to_be_signed: $val_view_type<'a>,
-            to_be_signed_raw: &'a [u8],
-            signature: SignatureView<'a>,
+            pub tbs: $val_view_type<'a>,
+            tbs_raw: &'a [u8],
+            pub signature: SignatureView<'a>,
         }
+
         impl $signed_owned_type {
             const SIGNATURE_LABEL: &[u8] = $label;
 
-            fn new(
-                to_be_signed: $val_owned_type,
+            pub fn new(
+                tbs: $val_owned_type,
                 signature_priv: SignaturePrivateKeyView,
             ) -> Result<$signed_owned_type> {
                 // Serialize the part to be signed
-                let mut to_be_signed_raw = Vec::new();
-                to_be_signed.serialize(&mut to_be_signed_raw)?;
+                let mut tbs_raw = Vec::new();
+                tbs.serialize(&mut tbs_raw)?;
 
                 // Populate the signature
-                let signature = crypto::sign_with_label(
-                    &to_be_signed_raw,
-                    Self::SIGNATURE_LABEL,
-                    signature_priv,
-                )?;
+                let signature =
+                    crypto::sign_with_label(&tbs_raw, Self::SIGNATURE_LABEL, signature_priv)?;
 
                 let group_info = $signed_owned_type {
-                    to_be_signed,
-                    to_be_signed_raw,
+                    tbs,
+                    tbs_raw,
                     signature,
                 };
                 Ok(group_info)
@@ -79,9 +86,9 @@ macro_rules! mls_signed {
         }
 
         impl<'a> $signed_view_type<'a> {
-            fn verify(&self, signature_key: SignaturePublicKeyView) -> Result<bool> {
+            pub fn verify(&self, signature_key: SignaturePublicKeyView) -> Result<()> {
                 crypto::verify_with_label(
-                    self.to_be_signed_raw.as_ref(),
+                    self.tbs_raw.as_ref(),
                     $signed_owned_type::SIGNATURE_LABEL,
                     signature_key,
                     self.signature.clone(),
@@ -89,11 +96,33 @@ macro_rules! mls_signed {
             }
         }
 
+        impl Deref for $signed_owned_type {
+            type Target = $val_owned_type;
+
+            fn deref(&self) -> &Self::Target {
+                &self.tbs
+            }
+        }
+
+        impl DerefMut for $signed_owned_type {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.tbs
+            }
+        }
+
+        impl<'a> Deref for $signed_view_type<'a> {
+            type Target = $val_view_type<'a>;
+
+            fn deref(&self) -> &Self::Target {
+                &self.tbs
+            }
+        }
+
         impl Serialize for $signed_owned_type {
             const MAX_SIZE: usize = sum(&[$val_owned_type::MAX_SIZE, Signature::MAX_SIZE]);
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
-                self.to_be_signed.serialize(writer)?;
+                self.tbs.serialize(writer)?;
                 self.signature.serialize(writer)?;
                 Ok(())
             }
@@ -103,13 +132,13 @@ macro_rules! mls_signed {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
                 let mut sub_reader = reader.fork();
 
-                let to_be_signed = $val_view_type::deserialize(&mut sub_reader)?;
-                let to_be_signed_raw = reader.read_ref(sub_reader.position())?;
+                let tbs = $val_view_type::deserialize(&mut sub_reader)?;
+                let tbs_raw = reader.read_ref(sub_reader.position())?;
                 let signature = SignatureView::deserialize(reader)?;
 
                 Ok(Self {
-                    to_be_signed,
-                    to_be_signed_raw,
+                    tbs,
+                    tbs_raw,
                     signature,
                 })
             }
@@ -120,8 +149,8 @@ macro_rules! mls_signed {
 
             fn as_view<'a>(&'a self) -> Self::View<'a> {
                 Self::View {
-                    to_be_signed: self.to_be_signed.as_view(),
-                    to_be_signed_raw: &self.to_be_signed_raw,
+                    tbs: self.tbs.as_view(),
+                    tbs_raw: &self.tbs_raw,
                     signature: self.signature.as_view(),
                 }
             }
@@ -132,8 +161,8 @@ macro_rules! mls_signed {
 
             fn to_owned(&self) -> Self::Owned {
                 Self::Owned {
-                    to_be_signed: self.to_be_signed.to_owned(),
-                    to_be_signed_raw: self.to_be_signed_raw.try_into().unwrap(),
+                    tbs: self.tbs.to_owned(),
+                    tbs_raw: self.tbs_raw.try_into().unwrap(),
                     signature: self.signature.to_owned(),
                 }
             }
@@ -153,7 +182,7 @@ macro_rules! mls_encrypted {
         impl $ct_owned_type {
             const MAX_CT_SIZE: usize = $pt_owned_type::MAX_SIZE + crypto::AEAD_OVERHEAD;
 
-            fn seal(
+            pub fn seal(
                 plaintext: $pt_owned_type,
                 key: AeadKey,
                 nonce: AeadNonce,
@@ -173,7 +202,7 @@ macro_rules! mls_encrypted {
         }
 
         impl<'a> $ct_view_type<'a> {
-            fn open(
+            pub fn open(
                 &self,
                 key: AeadKey,
                 nonce: AeadNonce,
@@ -205,7 +234,7 @@ macro_rules! mls_hpke_encrypted {
         }
 
         impl $hpke_owned_type {
-            fn seal(
+            pub fn seal(
                 plaintext: $pt_owned_type,
                 encryption_key: HpkePublicKeyView,
                 aad: &[u8],
@@ -223,7 +252,7 @@ macro_rules! mls_hpke_encrypted {
         }
 
         impl<'a> $hpke_view_type<'a> {
-            fn open(
+            pub fn open(
                 &self,
                 encryption_priv: HpkePrivateKeyView,
                 aad: &[u8],
@@ -421,6 +450,7 @@ mls_newtype_primitive! { Epoch + EpochView => u64 }
 mls_struct! {
     GroupContext + GroupContextView,
     version: ProtocolVersion + ProtocolVersionView,
+    cipher_suite: CipherSuite + CipherSuiteView,
     group_id: GroupId + GroupIdView,
     epoch: Epoch + EpochView,
     tree_hash: HashOutput + HashOutputView,
@@ -428,12 +458,28 @@ mls_struct! {
     extensions: ExtensionList + ExtensionListView,
 }
 
+// Extensions
+mls_newtype_opaque! {
+    GroupInfoExtensionData + GroupInfoExtensionDataView,
+    consts::MAX_GROUP_INFO_EXTENSION_SIZE
+}
+
+mls_struct! {
+    GroupInfoExtension + GroupInfoExtensionView,
+    extension_type: ExtensionType + ExtensionTypeView,
+    extension_data: GroupInfoExtensionData + GroupInfoExtensionDataView,
+}
+
+type GroupInfoExtensionList = Vec<GroupInfoExtension, { consts::MAX_GROUP_INFO_EXTENSIONS }>;
+type GroupInfoExtensionListView<'a> =
+    Vec<GroupInfoExtensionView<'a>, { consts::MAX_GROUP_INFO_EXTENSIONS }>;
+
 mls_newtype_primitive! { LeafIndex + LeafIndexView => u32 }
 
 mls_struct! {
     GroupInfoTbs + GroupInfoTbsView,
     group_context: GroupContext + GroupContextView,
-    extensions: ExtensionList + ExtensionListView,
+    extensions: GroupInfoExtensionList + GroupInfoExtensionListView,
     confirmation_tag: HashOutput + HashOutputView,
     signer: LeafIndex + LeafIndexView,
 }
@@ -691,7 +737,7 @@ mls_struct! {
 }
 
 impl PrivateMessage {
-    fn new(
+    pub fn new(
         signed_framed_content: SignedFramedContent,
         confirmation_tag: HashOutput,
         sender_data: SenderData,
@@ -701,7 +747,7 @@ impl PrivateMessage {
         authenticated_data: PrivateMessageAad,
     ) -> Result<Self> {
         // Form payload
-        let MessageContent::Commit(commit) = signed_framed_content.to_be_signed.content.content;
+        let MessageContent::Commit(commit) = signed_framed_content.tbs.content.content;
         let signature = signed_framed_content.signature;
         let plaintext = PrivateMessageContent {
             commit,
@@ -710,8 +756,8 @@ impl PrivateMessage {
         };
 
         // Encrypt payload
-        let group_id = signed_framed_content.to_be_signed.content.group_id;
-        let epoch = signed_framed_content.to_be_signed.content.epoch;
+        let group_id = signed_framed_content.tbs.content.group_id;
+        let epoch = signed_framed_content.tbs.content.epoch;
         let aad = serialize!(
             PrivateMessageContentAad,
             PrivateMessageContentAad {
@@ -749,7 +795,7 @@ impl PrivateMessage {
 }
 
 impl<'a> PrivateMessageView<'a> {
-    fn open(
+    pub fn open(
         &self,
         sender_data_secret: HashOutputView,
         sender_key_source: &impl SenderKeySource,
@@ -803,7 +849,7 @@ impl<'a> PrivateMessageView<'a> {
         let content = PrivateMessageContentView::deserialize(&mut plaintext_reader)?;
 
         // Construct objects to return
-        let to_be_signed = FramedContentTbs {
+        let tbs = FramedContentTbs {
             version: consts::SUPPORTED_VERSION,
             wire_format: consts::SUPPORTED_WIRE_FORMAT,
             content: FramedContent {
@@ -815,11 +861,11 @@ impl<'a> PrivateMessageView<'a> {
             },
             binder: FramedContentBinder::Member(group_context),
         };
-        let to_be_signed_raw = serialize!(FramedContentTbs, to_be_signed);
+        let tbs_raw = serialize!(FramedContentTbs, tbs);
 
         let signed_framed_content = SignedFramedContent {
-            to_be_signed,
-            to_be_signed_raw,
+            tbs,
+            tbs_raw,
             signature: content.signature.to_owned(),
         };
         let confirmation_hash = content.confirmation_tag.to_owned();
@@ -828,7 +874,7 @@ impl<'a> PrivateMessageView<'a> {
     }
 }
 
-trait SenderKeySource {
+pub trait SenderKeySource {
     fn find_keys<'a>(
         &self,
         sender: LeafIndex,

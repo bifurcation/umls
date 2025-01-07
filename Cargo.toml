@@ -36,6 +36,7 @@ p384 = { version = "0.13", default-features = false, features = ["alloc", "ecdh"
 x25519-dalek = { version = "2", default-features = false, features = ["alloc", "static_secrets"] }
 ed25519-dalek = { version = "2", default-features = false, features = ["alloc", "rand_core"] }
 sec1 = { version = "0.7", default-features = false, features = ["alloc"] }
+rand = "0.8.5"
 
 [dev-dependencies]
 rand = "0.8.5"

@@ -86,6 +86,19 @@ mls_newtype_opaque! {
     consts::SIGNATURE_SIZE
 }
 
+pub trait Zero {
+    fn zero() -> Self;
+}
+
+impl Zero for HashOutput {
+    fn zero() -> Self {
+        let mut hash_output = Self::default();
+        let vec = &mut hash_output.0 .0;
+        vec.resize_default(consts::HASH_OUTPUT_SIZE).unwrap();
+        hash_output
+    }
+}
+
 pub struct Hash {
     hash: Sha256,
 }
@@ -110,6 +123,14 @@ impl Write for Hash {
     }
 }
 
+pub fn hmac(key: &[u8], data: &[u8]) -> HashOutput {
+    todo!()
+}
+
+pub fn hash_ref(label: &'static [u8], value: &impl Serialize) -> Result<HashOutput> {
+    todo!()
+}
+
 pub fn extract(salt: HashOutputView, ikm: HashOutputView) -> HashOutput {
     todo!()
 }
@@ -123,6 +144,17 @@ pub fn expand_with_label(
 }
 
 pub fn derive_secret(secret: HashOutputView, label: &'static [u8]) -> HashOutput {
+    todo!()
+}
+
+pub fn derive_tree_key_nonce(
+    ratchet_secret: HashOutputView,
+    generation: u32,
+) -> (AeadKey, AeadNonce) {
+    todo!()
+}
+
+pub fn derive_welcome_key_nonce(welcome_secret: HashOutputView) -> (AeadKey, AeadNonce) {
     todo!()
 }
 
@@ -173,7 +205,7 @@ pub fn verify_with_label(
     label: &[u8],
     signature_key: SignaturePublicKeyView,
     signature: SignatureView,
-) -> Result<bool> {
+) -> Result<()> {
     let key_bytes = signature_key.as_ref().try_into().unwrap();
     let sig_bytes = signature.as_ref();
 
@@ -182,7 +214,7 @@ pub fn verify_with_label(
 
     let digest = signature_digest(message, label)?;
     let ver = raw_key.verify(digest.as_ref(), &raw_sig).is_ok();
-    Ok(ver)
+    ver.then_some(()).ok_or(Error("Invalid signature"))
 }
 
 pub fn generate_hpke(rng: &mut impl CryptoRngCore) -> Result<(HpkePrivateKey, HpkePublicKey)> {

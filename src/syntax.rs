@@ -138,10 +138,10 @@ primitive_int_serde!(u64);
 macro_rules! mls_newtype_primitive {
     ($owned_type:ident + $view_type:ident => $int:ty) => {
         #[derive(Default, Clone, Copy, PartialEq, Debug)]
-        pub struct $owned_type($int);
+        pub struct $owned_type(pub $int);
 
         #[derive(Clone, Copy, PartialEq, Debug)]
-        pub struct $view_type<'a>($int, PhantomLifetime<'a>);
+        pub struct $view_type<'a>(pub $int, PhantomLifetime<'a>);
 
         impl From<$int> for $owned_type {
             fn from(val: $int) -> Self {
@@ -573,7 +573,7 @@ macro_rules! mls_struct_serialize {
     ($owned_type:ident, $($field_name:ident: $field_type:ident,)*) => {
         #[derive(Clone, Default, Debug, PartialEq)]
         pub struct $owned_type {
-            $($field_name: $field_type,)*
+            $(pub $field_name: $field_type,)*
         }
 
         impl Serialize for $owned_type {
@@ -597,7 +597,7 @@ macro_rules! mls_struct {
 
         #[derive(Clone, Debug, PartialEq)]
         pub struct $view_type<'a> {
-            $($field_name: $field_view_type<'a>,)*
+            $(pub $field_name: $field_view_type<'a>,)*
         }
 
         impl<'a> Deserialize<'a> for $view_type<'a> {
