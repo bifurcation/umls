@@ -43,9 +43,29 @@ pub fn create_group(
 pub fn join_group(
     _key_package_priv: KeyPackagePrivView,
     _key_package: KeyPackageView,
-    _welcome: WelcomeView,
+    welcome: WelcomeView,
 ) -> Result<GroupState> {
-    // Trivial once we know what's in a group
+    // Verify that the Welcome is for us, then decrypt it
+
+    // Decrypt the Group Secrets
+
+    // Decrypt the GroupInfo
+
+    // Extract the ratchet tree from an extension
+
+    // Verify the signature on the GroupInfo
+
+    // Import the data into a GroupState
+    let group_state = GroupState {
+        // ratchet_tree, // parsed from GroupInfo extension
+        // group_context, // copied from GroupInfo
+        // interim_transcript_hash, // Computed from confirmed + confirmation_tag
+        // init_secret, // Computed from joiner_secret
+        // my_index, // Looked up in tree
+        // my_signature_priv, // Copied from key_package_priv
+        ..Default::default()
+    };
+
     todo!();
 }
 
@@ -167,7 +187,7 @@ pub fn add_member(
 
     let group_info = GroupInfo::new(group_info_tbs, next.my_signature_priv.as_view())?;
     let (welcome_key, welcome_nonce) =
-        crypto::derive_welcome_key_nonce(key_schedule_epoch.welcome_secret.as_view());
+        crypto::welcome_key_nonce(key_schedule_epoch.welcome_secret.as_view());
     let encrypted_group_info =
         EncryptedGroupInfo::seal(group_info, welcome_key, welcome_nonce, &[])?;
 

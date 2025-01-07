@@ -163,7 +163,7 @@ impl KeyScheduleEpoch {
         let handshake_secret = crypto::expand_with_label(tree_secret.as_view(), b"handshake", &[]);
 
         let generation = 0;
-        let (key, nonce) = crypto::derive_tree_key_nonce(handshake_secret.as_view(), generation);
+        let (key, nonce) = crypto::tree_key_nonce(handshake_secret.as_view(), generation);
         (generation, key, nonce)
     }
 }

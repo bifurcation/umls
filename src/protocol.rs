@@ -191,11 +191,7 @@ macro_rules! mls_encrypted {
                 let pt = serialize!($pt_owned_type, plaintext);
 
                 let mut ct = Vec::<u8, { Self::MAX_CT_SIZE }>::new();
-                ct.resize_default(pt.len() + crypto::AEAD_OVERHEAD)
-                    .map_err(|_| Error("Unexpected error"))?;
-                let len = crypto::aead_seal(&mut ct, &pt, key, nonce, aad);
-                ct.resize_default(len)
-                    .map_err(|_| Error("Unexpected error"))?;
+                crypto::aead_seal(&mut ct, &pt, key, nonce, aad);
 
                 Ok(Self(Opaque::from(ct)))
             }
@@ -211,10 +207,7 @@ macro_rules! mls_encrypted {
                 let ct = self.0.as_ref();
 
                 let mut pt = Vec::new();
-                pt.resize_default(pt.capacity())
-                    .map_err(|_| Error("Unexpected error"))?;
                 let len = crypto::aead_open(&mut pt, &ct, key, nonce, aad)?;
-                pt.resize(len, 0).map_err(|_| Error("Unexpected error"))?;
 
                 Ok(pt)
             }

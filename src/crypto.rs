@@ -3,10 +3,12 @@ use crate::io::*;
 use crate::syntax::*;
 use crate::{mls_newtype_opaque, mls_newtype_primitive};
 
+use aes_gcm::{AeadCore, AeadInPlace, Aes128Gcm, KeyInit};
 use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use heapless::Vec;
+use hmac::{digest::FixedOutput, Mac, SimpleHmac};
 use rand_core::CryptoRngCore;
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -123,16 +125,91 @@ impl Write for Hash {
     }
 }
 
-pub fn hmac(key: &[u8], data: &[u8]) -> HashOutput {
-    todo!()
+pub struct Hmac {
+    mac: SimpleHmac<Sha256>,
 }
 
+impl Hmac {
+    pub fn new(key: &[u8]) -> Self {
+        let key = key.try_into().unwrap();
+        Self {
+            mac: <SimpleHmac<Sha256> as KeyInit>::new(key),
+        }
+    }
+
+    pub fn finalize(self) -> HashOutput {
+        let digest = self.mac.finalize_fixed();
+        HashOutput::try_from(digest.as_slice()).unwrap()
+    }
+}
+
+impl Write for Hmac {
+    fn write(&mut self, data: &[u8]) -> Result<()> {
+        self.mac.update(data);
+        Ok(())
+    }
+}
+
+pub fn hmac(key: &[u8], data: &[u8]) -> HashOutput {
+    let mut hmac = Hmac::new(key);
+    hmac.write(data).unwrap();
+    hmac.finalize()
+}
+
+/*
+struct {
+  opaque label<V>;
+  opaque value<V>;
+} RefHashInput;
+*/
 pub fn hash_ref(label: &'static [u8], value: &impl Serialize) -> Result<HashOutput> {
-    todo!()
+    let mut h = Hash::new();
+
+    Varint(label.len()).serialize(&mut h)?;
+    h.write(label)?;
+
+    let mut count = CountWriter::default();
+    value.serialize(&mut count)?;
+
+    Varint(count.len()).serialize(&mut h)?;
+    value.serialize(&mut h)?;
+
+    Ok(h.finalize())
 }
 
 pub fn extract(salt: HashOutputView, ikm: HashOutputView) -> HashOutput {
-    todo!()
+    hmac(salt.as_ref(), ikm.as_ref())
+}
+
+fn expand_with_label_full(
+    prk: HashOutputView,
+    label: &'static [u8],
+    context: &[u8],
+    len: u16,
+) -> HashOutput {
+    // We never need more than one block of output
+    //   T(0) = empty string (zero length)
+    //   T(1) = HMAC-Hash(PRK, T(0) | info | 0x01)
+    let mut h = Hmac::new(prk.as_ref());
+
+    // struct {
+    //   uint16 length;
+    //   opaque label<V>;
+    //   opaque context<V>;
+    // } KDFLabel;
+    len.serialize(&mut h).unwrap();
+
+    Varint(label.len()).serialize(&mut h).unwrap();
+    h.write(label).unwrap();
+
+    Varint(context.len()).serialize(&mut h).unwrap();
+    h.write(context).unwrap();
+
+    h.write(&[0x01]).unwrap();
+
+    let mut out = h.finalize();
+    out.0 .0.resize_default(len as usize).unwrap();
+    out
 }
 
 pub fn expand_with_label(
@@ -140,22 +217,64 @@ pub fn expand_with_label(
     label: &'static [u8],
     context: &[u8],
 ) -> HashOutput {
-    todo!()
+    expand_with_label_full(secret, label, context, consts::HASH_OUTPUT_SIZE as u16)
 }
 
 pub fn derive_secret(secret: HashOutputView, label: &'static [u8]) -> HashOutput {
-    todo!()
+    expand_with_label(secret, label, &[])
 }
 
-pub fn derive_tree_key_nonce(
-    ratchet_secret: HashOutputView,
-    generation: u32,
-) -> (AeadKey, AeadNonce) {
-    todo!()
+pub fn tree_key_nonce(secret: HashOutputView, generation: u32) -> (AeadKey, AeadNonce) {
+    let generation = generation.to_be_bytes();
+    let key_data = expand_with_label_full(
+        secret,
+        b"key",
+        generation.as_ref(),
+        consts::AEAD_KEY_SIZE as u16,
+    );
+    let nonce_data = expand_with_label_full(
+        secret,
+        b"nonce",
+        generation.as_ref(),
+        consts::AEAD_NONCE_SIZE as u16,
+    );
+
+    let key = AeadKey(Opaque(key_data.as_ref().try_into().unwrap()));
+    let nonce = AeadNonce(Opaque(nonce_data.as_ref().try_into().unwrap()));
+
+    (key, nonce)
 }
 
-pub fn derive_welcome_key_nonce(welcome_secret: HashOutputView) -> (AeadKey, AeadNonce) {
-    todo!()
+pub fn welcome_key_nonce(secret: HashOutputView) -> (AeadKey, AeadNonce) {
+    let key_data = expand_with_label_full(secret, b"key", &[], consts::AEAD_KEY_SIZE as u16);
+    let nonce_data = expand_with_label_full(secret, b"nonce", &[], consts::AEAD_NONCE_SIZE as u16);
+
+    let key = AeadKey(Opaque(key_data.as_ref().try_into().unwrap()));
+    let nonce = AeadNonce(Opaque(nonce_data.as_ref().try_into().unwrap()));
+
+    (key, nonce)
+}
+
+pub fn sender_data_key_nonce(secret: HashOutputView, ciphertext: &[u8]) -> (AeadKey, AeadNonce) {
+    let ciphertext_sample = &ciphertext[..consts::HASH_OUTPUT_SIZE];
+
+    let key_data = expand_with_label_full(
+        secret,
+        b"key",
+        ciphertext_sample,
+        consts::AEAD_KEY_SIZE as u16,
+    );
+    let nonce_data = expand_with_label_full(
+        secret,
+        b"nonce",
+        ciphertext_sample,
+        consts::AEAD_NONCE_SIZE as u16,
+    );
+
+    let key = AeadKey(Opaque(key_data.as_ref().try_into().unwrap()));
+    let nonce = AeadNonce(Opaque(nonce_data.as_ref().try_into().unwrap()));
+
+    (key, nonce)
 }
 
 pub fn generate_sig(
@@ -245,23 +364,54 @@ pub fn hpke_key_nonce(secret: HpkeKemSecret) -> (AeadKey, AeadNonce) {
     todo!();
 }
 
-pub fn aead_seal(ct: &mut [u8], pt: &[u8], key: AeadKey, nonce: AeadNonce, aad: &[u8]) -> usize {
-    todo!();
+pub fn aead_seal<const N: usize>(
+    ct: &mut Vec<u8, N>,
+    pt: &[u8],
+    key: AeadKey,
+    nonce: AeadNonce,
+    aad: &[u8],
+) {
+    type Key = aes_gcm::Key<Aes128Gcm>;
+    type Nonce = aes_gcm::Nonce<<Aes128Gcm as AeadCore>::NonceSize>;
+
+    let key: &Key = key.as_ref().into();
+    let nonce: &Nonce = nonce.as_ref().into();
+
+    // AES-GCM crate requires a different version of heapless
+    let mut inner_ct = aes_gcm::aead::heapless::Vec::<u8, N>::new();
+    inner_ct.extend_from_slice(pt).unwrap();
+
+    let aead = Aes128Gcm::new(key);
+    aead.encrypt_in_place(nonce, aad, &mut inner_ct).unwrap();
+
+    ct.clear();
+    ct.extend_from_slice(&inner_ct).unwrap()
 }
 
-pub fn aead_open(
-    pt: &mut [u8],
+pub fn aead_open<const N: usize>(
+    pt: &mut Vec<u8, N>,
     ct: &[u8],
     key: AeadKey,
     nonce: AeadNonce,
     aad: &[u8],
-) -> Result<usize> {
-    todo!();
-}
+) -> Result<()> {
+    type Key = aes_gcm::Key<Aes128Gcm>;
+    type Nonce = aes_gcm::Nonce<<Aes128Gcm as AeadCore>::NonceSize>;
 
-pub fn sender_data_key_nonce(
-    sender_data_secret: HashOutputView,
-    ciphertext: &[u8],
-) -> (AeadKey, AeadNonce) {
-    todo!();
+    let key: &Key = key.as_ref().into();
+    let nonce: &Nonce = nonce.as_ref().into();
+
+    // AES-GCM crate requires a different version of heapless
+    let mut inner_pt = aes_gcm::aead::heapless::Vec::<u8, N>::new();
+
+    let (ct, tag) = ct.split_at(ct.len() - consts::AEAD_OVERHEAD);
+    inner_pt.extend_from_slice(ct).unwrap();
+
+    let aead = Aes128Gcm::new(key);
+    aead.decrypt_in_place_detached(nonce, aad, &mut inner_pt, tag.into())
+        .map_err(|_| Error("AEAD error"))?;
+
+    pt.clear();
+    pt.extend_from_slice(&inner_pt).unwrap();
+    Ok(())
 }
