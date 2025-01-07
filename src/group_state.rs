@@ -20,3 +20,9 @@ mls_struct! {
     my_index: LeafIndex + LeafIndexView,
     my_signature_priv: SignaturePrivateKey + SignaturePrivateKeyView,
 }
+
+impl GroupState {
+    pub fn epoch_authenticator(&self) -> HashOutput {
+        self.epoch_secret.epoch_authenticator()
+    }
+}

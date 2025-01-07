@@ -355,3 +355,50 @@ pub fn handle_commit(
 ) -> Result<GroupState> {
     todo!();
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_create_group() {
+        let mut rng = rand::thread_rng();
+
+        let (sig_priv, sig_key) = crypto::generate_sig(&mut rng).unwrap();
+        let credential = Credential::from(b"alice".as_slice());
+        let group_id = GroupId::from(Opaque::try_from(b"just alice".as_slice()).unwrap());
+
+        let (kp_priv, kp) = make_key_package(&mut rng, sig_priv, sig_key, credential).unwrap();
+
+        let _state_a0 = create_group(&mut rng, kp_priv.as_view(), kp.as_view(), group_id).unwrap();
+    }
+
+    #[test]
+    fn test_join_group() {
+        let mut rng = rand::thread_rng();
+
+        let (sig_priv_a, sig_key_a) = crypto::generate_sig(&mut rng).unwrap();
+        let credential_a = Credential::from(b"alice".as_slice());
+
+        let (sig_priv_b, sig_key_b) = crypto::generate_sig(&mut rng).unwrap();
+        let credential_b = Credential::from(b"bob".as_slice());
+
+        let group_id = GroupId::from(Opaque::try_from(b"just alice".as_slice()).unwrap());
+
+        let (kp_priv_a, kp_a) =
+            make_key_package(&mut rng, sig_priv_a, sig_key_a, credential_a).unwrap();
+        let (kp_priv_b, kp_b) =
+            make_key_package(&mut rng, sig_priv_b, sig_key_b, credential_b).unwrap();
+
+        let state_a0 =
+            create_group(&mut rng, kp_priv_a.as_view(), kp_a.as_view(), group_id).unwrap();
+
+        let (state_a1, _commit_a1, welcome_1) =
+            add_member(&mut rng, state_a0.as_view(), kp_b.as_view()).unwrap();
+
+        let state_b1 =
+            join_group(kp_priv_b.as_view(), kp_b.as_view(), welcome_1.as_view()).unwrap();
+
+        assert!(state_a1.epoch_authenticator() == state_b1.epoch_authenticator());
+    }
+}

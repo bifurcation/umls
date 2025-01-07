@@ -327,6 +327,13 @@ impl Default for Credential {
     }
 }
 
+impl From<&[u8]> for Credential {
+    fn from(val: &[u8]) -> Self {
+        let vec: Vec<u8, { consts::MAX_CREDENTIAL_SIZE }> = val.try_into().unwrap();
+        Credential::Basic(BasicCredential::from(Opaque::from(vec)))
+    }
+}
+
 // Capabilities
 mls_newtype_primitive! { ProtocolVersion + ProtocolVersionView => u16 }
 mls_newtype_primitive! { ExtensionType + ExtensionTypeView => u16 }

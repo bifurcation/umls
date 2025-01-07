@@ -34,8 +34,8 @@ mls_enum! {
 type OptionalNode = Option<Node>;
 type OptionalNodeView<'a> = Option<NodeView<'a>>;
 
-type NodeList = Vec<OptionalNode, { consts::MAX_GROUP_SIZE }>;
-type NodeListView<'a> = Vec<OptionalNodeView<'a>, { consts::MAX_GROUP_SIZE }>;
+type NodeList = Vec<OptionalNode, { 2 * consts::MAX_GROUP_SIZE - 1 }>;
+type NodeListView<'a> = Vec<OptionalNodeView<'a>, { 2 * consts::MAX_GROUP_SIZE - 1 }>;
 
 mls_struct! {
     RatchetTree + RatchetTreeView,

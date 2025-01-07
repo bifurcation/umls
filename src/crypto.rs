@@ -131,9 +131,8 @@ pub struct Hmac {
 
 impl Hmac {
     pub fn new(key: &[u8]) -> Self {
-        let key = key.try_into().unwrap();
         Self {
-            mac: <SimpleHmac<Sha256> as KeyInit>::new(key),
+            mac: <SimpleHmac<Sha256> as KeyInit>::new_from_slice(key).unwrap(),
         }
     }
 

@@ -134,6 +134,10 @@ impl EpochSecret {
         )
     }
 
+    pub fn epoch_authenticator(&self) -> HashOutput {
+        crypto::derive_secret(self.as_view().into(), b"authentication")
+    }
+
     pub fn sender_data_secret(&self) -> HashOutput {
         crypto::derive_secret(self.as_view().into(), b"sender data")
     }
