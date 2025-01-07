@@ -17,12 +17,13 @@ use common::*;
 use crypto::*;
 use group_state::*;
 use io::*;
+use key_schedule::*;
 use protocol::*;
 use syntax::*;
 use treekem::*;
 
 use heapless::Vec;
-use rand::Rng;
+use rand::{Fill, Rng};
 use rand_core::CryptoRngCore;
 
 pub fn make_key_package(
@@ -79,11 +80,48 @@ pub fn make_key_package(
 }
 
 pub fn create_group(
-    _key_package_priv: KeyPackagePrivView,
-    _key_package: KeyPackageView,
+    rng: &mut (impl Rng + CryptoRngCore),
+    key_package_priv: KeyPackagePrivView,
+    key_package: KeyPackageView,
+    group_id: GroupId,
 ) -> Result<GroupState> {
-    // Trivial once we know what's in a group state
-    todo!();
+    // Construct the ratchet tree
+    let mut ratchet_tree = RatchetTree::default();
+    ratchet_tree.add_leaf(key_package.leaf_node.to_owned())?;
+
+    // Generate a fresh epoch secret
+    let mut epoch_secret = EpochSecret::default();
+    epoch_secret
+        .0
+        .resize_default(crypto::consts::HASH_OUTPUT_SIZE)
+        .unwrap();
+    epoch_secret.as_mut().try_fill(rng).unwrap();
+
+    // Set the group context
+    let group_context = GroupContext {
+        version: protocol::consts::SUPPORTED_VERSION,
+        cipher_suite: crypto::consts::CIPHER_SUITE,
+        group_id,
+        epoch: Epoch(0),
+        tree_hash: ratchet_tree.root_hash(),
+        confirmed_transcript_hash: Default::default(),
+        extensions: Default::default(),
+    };
+
+    // Compute the interim transcript hash
+    let confirmation_tag = epoch_secret.confirmation_tag(&group_context.confirmed_transcript_hash);
+    let interim_transcript_hash =
+        transcript_hash::interim(&group_context.confirmed_transcript_hash, &confirmation_tag)?;
+
+    Ok(GroupState {
+        ratchet_tree,
+        group_context,
+        interim_transcript_hash,
+        epoch_secret,
+        my_index: LeafIndex(0),
+        my_signature_priv: key_package_priv.signature_priv.to_owned(),
+        ..Default::default()
+    })
 }
 
 pub fn join_group(
@@ -131,6 +169,12 @@ pub fn join_group(
     let ratchet_tree_data = ratchet_tree_extension.extension_data;
     let mut ratchet_tree_reader = SliceReader::new(ratchet_tree_data.as_ref());
     let ratchet_tree = RatchetTreeView::deserialize(&mut ratchet_tree_reader)?;
+    let ratchet_tree = ratchet_tree.to_owned();
+
+    let tree_hash = ratchet_tree.root_hash();
+    if tree_hash.as_view() != group_info.group_context.tree_hash {
+        return Err(Error("Invalid ratchet tree"));
+    }
 
     // Find our own leaf in the ratchet tree
     let Some(my_index) = ratchet_tree.find(key_package.leaf_node.clone()) else {
@@ -138,11 +182,14 @@ pub fn join_group(
     };
 
     // Verify the signature on the GroupInfo
-    let Some(signer_leaf) = ratchet_tree.leaf_node_at(group_info.signer.to_owned()) else {
-        return Err(Error("GroupInfo signer not present in tree"));
-    };
+    {
+        // Scoped to bound the lifetime of signer_leaf
+        let Some(signer_leaf) = ratchet_tree.leaf_node_at(group_info.signer.to_owned()) else {
+            return Err(Error("GroupInfo signer not present in tree"));
+        };
 
-    group_info.verify(signer_leaf.signature_key)?;
+        group_info.verify(signer_leaf.signature_key)?;
+    }
 
     // Update the key schedule
     let group_context = group_info.group_context.to_owned();
@@ -150,20 +197,17 @@ pub fn join_group(
     let epoch_secret = member_secret.advance(&group_context_bytes);
 
     let confirmation_tag = epoch_secret.confirmation_tag(&group_context.confirmed_transcript_hash);
-    let interim_transcript_hash = transcript_hash::interim(
-        group_context.confirmed_transcript_hash.as_view(),
-        &confirmation_tag,
-    )?;
+    let interim_transcript_hash =
+        transcript_hash::interim(&group_context.confirmed_transcript_hash, &confirmation_tag)?;
 
     // Import the data into a GroupState
     Ok(GroupState {
-        ratchet_tree: ratchet_tree.to_owned(),
+        ratchet_tree,
         group_context,
         interim_transcript_hash,
         epoch_secret,
         my_index,
         my_signature_priv: key_package_priv.signature_priv.to_owned(),
-        ..Default::default()
     })
 }
 

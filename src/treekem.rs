@@ -42,28 +42,26 @@ mls_struct! {
     nodes: NodeList + NodeListView,
 }
 
-impl<'a> RatchetTreeView<'a> {
-    pub fn find(&self, leaf_node: LeafNodeView<'a>) -> Option<LeafIndex> {
+impl RatchetTree {
+    pub fn size(&self) -> usize {
+        self.nodes.len() / 2 + 1
+    }
+
+    pub fn find(&self, leaf_node: LeafNodeView) -> Option<LeafIndex> {
         let target = Some(NodeView::Leaf(leaf_node));
         self.nodes
             .iter()
             .step_by(2)
-            .position(|n| *n == target)
+            .position(|n| n.as_view() == target)
             .map(|i| LeafIndex(i as u32))
     }
 
-    pub fn leaf_node_at(&self, index: LeafIndex) -> Option<LeafNodeView<'a>> {
+    pub fn leaf_node_at(&self, index: LeafIndex) -> Option<LeafNodeView> {
         let index = index.0 as usize;
-        self.nodes[index].clone().and_then(|n| match n {
-            NodeView::Leaf(leaf_node) => Some(leaf_node),
-            NodeView::Parent(_) => None,
+        self.nodes[index].as_ref().and_then(|n| match n {
+            Node::Leaf(leaf_node) => Some(leaf_node.as_view()),
+            Node::Parent(_) => None,
         })
-    }
-}
-
-impl RatchetTree {
-    pub fn size(&self) -> usize {
-        self.nodes.len() / 2 + 1
     }
 
     pub fn add_leaf(&mut self, leaf_node: LeafNode) -> Result<()> {

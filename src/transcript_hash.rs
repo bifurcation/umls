@@ -20,7 +20,7 @@ pub fn confirmed(
 }
 
 pub fn interim(
-    confirmed_transcript_hash: HashOutputView,
+    confirmed_transcript_hash: &HashOutput,
     confirmation_tag: &HashOutput,
 ) -> Result<HashOutput> {
     let mut h = Hash::new();

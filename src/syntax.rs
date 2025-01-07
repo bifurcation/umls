@@ -389,6 +389,12 @@ impl<const N: usize> AsRef<[u8]> for Opaque<N> {
     }
 }
 
+impl<const N: usize> AsMut<[u8]> for Opaque<N> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.0.as_mut()
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct OpaqueView<'a, const N: usize>(pub &'a [u8]);
 

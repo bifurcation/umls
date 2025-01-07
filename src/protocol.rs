@@ -865,9 +865,9 @@ impl<'a> PrivateMessageView<'a> {
             tbs_raw,
             signature: content.signature.to_owned(),
         };
-        let confirmation_hash = content.confirmation_tag.to_owned();
+        let confirmation_tag = content.confirmation_tag.to_owned();
 
-        todo!();
+        Ok((signed_framed_content, confirmation_tag))
     }
 }
 
