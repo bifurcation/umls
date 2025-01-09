@@ -277,6 +277,10 @@ pub fn add_member(
     let confirmation_tag = next
         .epoch_secret
         .confirmation_tag(&next.group_context.confirmed_transcript_hash);
+    next.interim_transcript_hash = transcript_hash::interim(
+        &next.group_context.confirmed_transcript_hash,
+        &confirmation_tag,
+    )?;
     let (generation, key, nonce) = group_state
         .epoch_secret
         .to_object()
@@ -418,6 +422,11 @@ pub fn handle_commit(
     if confirmation_tag_message != confirmation_tag_computed {
         return Err(Error("Invalid confirmation tag"));
     }
+
+    next.interim_transcript_hash = transcript_hash::interim(
+        &next.group_context.confirmed_transcript_hash,
+        &confirmation_tag_computed,
+    )?;
 
     Ok(next)
 }

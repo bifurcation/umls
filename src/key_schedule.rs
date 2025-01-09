@@ -128,6 +128,7 @@ impl<'a> EpochSecretView<'a> {
 impl EpochSecret {
     pub fn confirmation_tag(&self, confirmed_transcript_hash: &HashOutput) -> HashOutput {
         let confirmation_key = crypto::derive_secret(self.as_view().into(), b"confirm");
+
         crypto::hmac(
             confirmation_key.as_ref(),
             confirmed_transcript_hash.as_ref(),
