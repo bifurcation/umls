@@ -1,4 +1,4 @@
-#![no_std]
+//#![no_std]
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
@@ -435,100 +435,105 @@ pub fn handle_commit(
 mod test {
     use super::*;
 
+    fn make_user(
+        rng: &mut (impl CryptoRngCore + Rng),
+        name: &[u8],
+    ) -> (KeyPackagePriv, KeyPackage) {
+        let (sig_priv, sig_key) = crypto::generate_sig(rng).unwrap();
+        let credential = Credential::from(b"alice".as_slice());
+        make_key_package(rng, sig_priv, sig_key, credential).unwrap()
+    }
+
+    struct TestGroup {
+        states: Vec<Option<GroupState>, 10>,
+    }
+
+    impl TestGroup {
+        fn new(group_id: &[u8], creator_name: &[u8]) -> Self {
+            let mut rng = rand::thread_rng();
+
+            let group_id = GroupId::from(Opaque::try_from(group_id).unwrap());
+
+            let (kp_priv, kp) = make_user(&mut rng, creator_name);
+            let state = create_group(&mut rng, kp_priv.as_view(), kp.as_view(), group_id).unwrap();
+
+            let mut states = Vec::new();
+            states.push(Some(state)).unwrap();
+            Self { states }
+        }
+
+        fn add(&mut self, committer: usize, joiner_name: &[u8]) {
+            let mut rng = rand::thread_rng();
+
+            let (kp_priv, kp) = make_user(&mut rng, joiner_name);
+
+            let committer_prev = self.states[committer].take().unwrap();
+            let (committer_next, commit, welcome) =
+                add_member(&mut rng, committer_prev.as_view(), kp.as_view()).unwrap();
+            let joiner_next =
+                join_group(kp_priv.as_view(), kp.as_view(), welcome.as_view()).unwrap();
+
+            // Everyone in the group handles the commit (note that committer is currently None)
+            for state in self.states.iter_mut().filter(|s| s.is_some()) {
+                let prev = state.take().unwrap();
+                let next = handle_commit(prev.as_view(), commit.as_view()).unwrap();
+                *state = Some(next);
+            }
+
+            // Committer transitions to a new state
+            self.states[committer] = Some(committer_next);
+
+            // Insert the joiner at the proper location
+            let joiner = match self.states.iter().position(|s| s.is_none()) {
+                Some(index) => {
+                    println!("Found blank: {}", index);
+                    index
+                }
+                None => {
+                    println!("Found extending");
+                    self.states.push(None).unwrap();
+                    self.states.len() - 1
+                }
+            };
+
+            self.states[joiner] = Some(joiner_next);
+        }
+
+        fn check(&self) {
+            let reference = self
+                .states
+                .iter()
+                .find(|s| s.is_some())
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .epoch_authenticator();
+
+            for state in self.states.iter().filter(|s| s.is_some()) {
+                assert_eq!(state.as_ref().unwrap().epoch_authenticator(), reference);
+            }
+        }
+    }
+
     #[test]
     fn test_create_group() {
-        let mut rng = rand::thread_rng();
-
-        // Create initial state
-        let (sig_priv, sig_key) = crypto::generate_sig(&mut rng).unwrap();
-        let credential = Credential::from(b"alice".as_slice());
-        let group_id = GroupId::from(Opaque::try_from(b"just alice".as_slice()).unwrap());
-
-        // Initialize the group
-        let (kp_priv, kp) = make_key_package(&mut rng, sig_priv, sig_key, credential).unwrap();
-        let _state_a0 = create_group(&mut rng, kp_priv.as_view(), kp.as_view(), group_id).unwrap();
+        let _group = TestGroup::new(b"just alice", b"alice");
     }
 
     #[test]
     fn test_join_group() {
-        let mut rng = rand::thread_rng();
-
-        // Create initial state
-        let (sig_priv_a, sig_key_a) = crypto::generate_sig(&mut rng).unwrap();
-        let credential_a = Credential::from(b"alice".as_slice());
-
-        let (sig_priv_b, sig_key_b) = crypto::generate_sig(&mut rng).unwrap();
-        let credential_b = Credential::from(b"bob".as_slice());
-
-        let group_id = GroupId::from(Opaque::try_from(b"alice and bob".as_slice()).unwrap());
-
-        // Create key packages
-        let (kp_priv_a, kp_a) =
-            make_key_package(&mut rng, sig_priv_a, sig_key_a, credential_a).unwrap();
-        let (kp_priv_b, kp_b) =
-            make_key_package(&mut rng, sig_priv_b, sig_key_b, credential_b).unwrap();
-
-        // Initialize the group
-        let state_a0 =
-            create_group(&mut rng, kp_priv_a.as_view(), kp_a.as_view(), group_id).unwrap();
-
-        // Add the second member
-        let (state_a1, _commit_a1, welcome_1) =
-            add_member(&mut rng, state_a0.as_view(), kp_b.as_view()).unwrap();
-
-        let state_b1 =
-            join_group(kp_priv_b.as_view(), kp_b.as_view(), welcome_1.as_view()).unwrap();
-
-        assert!(state_a1.epoch_authenticator() == state_b1.epoch_authenticator());
+        let mut group = TestGroup::new(b"alice and bob", b"alice");
+        group.add(0, b"bob");
+        group.check();
     }
 
     #[test]
     fn test_three_member_group() {
-        let mut rng = rand::thread_rng();
+        let mut group = TestGroup::new(b"alice, bob, carol", b"alice");
+        group.add(0, b"bob");
+        group.check();
 
-        // Create initial state
-        let (sig_priv_a, sig_key_a) = crypto::generate_sig(&mut rng).unwrap();
-        let credential_a = Credential::from(b"alice".as_slice());
-
-        let (sig_priv_b, sig_key_b) = crypto::generate_sig(&mut rng).unwrap();
-        let credential_b = Credential::from(b"bob".as_slice());
-
-        let (sig_priv_c, sig_key_c) = crypto::generate_sig(&mut rng).unwrap();
-        let credential_c = Credential::from(b"bob".as_slice());
-
-        let group_id = GroupId::from(Opaque::try_from(b"alice, bob, carol".as_slice()).unwrap());
-
-        // Create key packages
-        let (kp_priv_a, kp_a) =
-            make_key_package(&mut rng, sig_priv_a, sig_key_a, credential_a).unwrap();
-        let (kp_priv_b, kp_b) =
-            make_key_package(&mut rng, sig_priv_b, sig_key_b, credential_b).unwrap();
-        let (kp_priv_c, kp_c) =
-            make_key_package(&mut rng, sig_priv_c, sig_key_c, credential_c).unwrap();
-
-        // Initialize the group
-        let state_a0 =
-            create_group(&mut rng, kp_priv_a.as_view(), kp_a.as_view(), group_id).unwrap();
-
-        // Add the second member
-        let (state_a1, _commit_1, welcome_1) =
-            add_member(&mut rng, state_a0.as_view(), kp_b.as_view()).unwrap();
-
-        let state_b1 =
-            join_group(kp_priv_b.as_view(), kp_b.as_view(), welcome_1.as_view()).unwrap();
-
-        assert!(state_a1.epoch_authenticator() == state_b1.epoch_authenticator());
-
-        // Add the third member
-        let (state_b2, commit_2, welcome_2) =
-            add_member(&mut rng, state_b1.as_view(), kp_c.as_view()).unwrap();
-
-        let state_c2 =
-            join_group(kp_priv_c.as_view(), kp_c.as_view(), welcome_2.as_view()).unwrap();
-
-        let state_a2 = handle_commit(state_a1.as_view(), commit_2.as_view()).unwrap();
-
-        assert!(state_b2.epoch_authenticator() == state_a2.epoch_authenticator());
-        assert!(state_b2.epoch_authenticator() == state_c2.epoch_authenticator());
+        group.add(1, b"carol");
+        group.check();
     }
 }
