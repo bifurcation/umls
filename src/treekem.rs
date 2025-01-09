@@ -42,6 +42,12 @@ mls_struct! {
     nodes: NodeList + NodeListView,
 }
 
+impl<'a> RatchetTreeView<'a> {
+    pub fn size(&self) -> usize {
+        self.nodes.len() / 2 + 1
+    }
+}
+
 impl RatchetTree {
     pub fn size(&self) -> usize {
         self.nodes.len() / 2 + 1
@@ -57,7 +63,7 @@ impl RatchetTree {
     }
 
     pub fn leaf_node_at(&self, index: LeafIndex) -> Option<LeafNodeView> {
-        let index = index.0 as usize;
+        let index = 2 * index.0 as usize;
         self.nodes[index].as_ref().and_then(|n| match n {
             Node::Leaf(leaf_node) => Some(leaf_node.as_view()),
             Node::Parent(_) => None,

@@ -31,7 +31,7 @@ pub mod consts {
     pub const MAX_CREDENTIAL_TYPES: usize = 1;
     pub const MAX_EXTENSION_SIZE: usize = 128;
     pub const MAX_EXTENSIONS: usize = 0;
-    pub const MAX_GROUP_ID_SIZE: usize = 16;
+    pub const MAX_GROUP_ID_SIZE: usize = 128;
     pub const MAX_WELCOME_PSKS: usize = 0;
     pub const MAX_GROUP_INFO_EXTENSIONS: usize = 1;
     pub const MAX_GROUP_INFO_EXTENSION_SIZE: usize = RatchetTree::MAX_SIZE;
@@ -39,7 +39,7 @@ pub mod consts {
     pub const MAX_PRIVATE_MESSAGE_AAD_SIZE: usize = 0;
     pub const MAX_PROPOSALS_PER_COMMIT: usize = 1;
 
-    pub const MAX_GROUP_SIZE: usize = 2;
+    pub const MAX_GROUP_SIZE: usize = 8;
     pub const MAX_UPDATE_PATH_LENGTH: usize = (MAX_GROUP_SIZE.ilog2() as usize) + 1;
 
     pub const EXTENSION_TYPE_RATCHET_TREE: ExtensionType = ExtensionType(0x0002);
@@ -158,14 +158,14 @@ macro_rules! mls_signed {
             }
         }
 
-        impl<'a> ToOwned for $signed_view_type<'a> {
-            type Owned = $signed_owned_type;
+        impl<'a> ToObject for $signed_view_type<'a> {
+            type Object = $signed_owned_type;
 
-            fn to_owned(&self) -> Self::Owned {
-                Self::Owned {
-                    tbs: self.tbs.to_owned(),
+            fn to_object(&self) -> Self::Object {
+                Self::Object {
+                    tbs: self.tbs.to_object(),
                     tbs_raw: self.tbs_raw.try_into().unwrap(),
-                    signature: self.signature.to_owned(),
+                    signature: self.signature.to_object(),
                 }
             }
         }
@@ -299,13 +299,13 @@ impl<T: AsView> AsView for Option<T> {
     }
 }
 
-impl<V: ToOwned> ToOwned for Option<V> {
-    type Owned = Option<V::Owned>;
+impl<V: ToObject> ToObject for Option<V> {
+    type Object = Option<V::Object>;
 
-    fn to_owned(&self) -> Self::Owned {
+    fn to_object(&self) -> Self::Object {
         match self {
             None => None,
-            Some(val) => Some(val.to_owned()),
+            Some(val) => Some(val.to_object()),
         }
     }
 }
@@ -801,9 +801,9 @@ impl PrivateMessage {
 impl<'a> PrivateMessageView<'a> {
     pub fn open(
         &self,
-        sender_data_secret: HashOutputView,
+        sender_data_secret: &HashOutput,
         sender_key_source: &impl SenderKeySource,
-        group_context: GroupContext,
+        group_context: &GroupContext,
     ) -> Result<(SignedFramedContent, HashOutput)> {
         // Check outer properties are correct
         if self.group_id != group_context.group_id.as_view() {
@@ -816,12 +816,12 @@ impl<'a> PrivateMessageView<'a> {
 
         // Decrypt sender data
         let (key, nonce) =
-            crypto::sender_data_key_nonce(sender_data_secret, self.ciphertext.as_ref());
+            crypto::sender_data_key_nonce(sender_data_secret.as_view(), self.ciphertext.as_ref());
         let aad = serialize!(
             SenderDataAad,
             SenderDataAad {
                 group_id: self.group_id,
-                epoch: self.epoch.to_owned(),
+                epoch: self.epoch.to_object(),
                 content_type: CONTENT_TYPE_COMMIT,
             }
         );
@@ -831,8 +831,8 @@ impl<'a> PrivateMessageView<'a> {
         let sender_data = SenderDataView::deserialize(&mut sender_data_reader)?;
 
         // Look up keys for the sender and generation
-        let leaf_index = sender_data.leaf_index.to_owned();
-        let generation = sender_data.generation.to_owned();
+        let leaf_index = sender_data.leaf_index.to_object();
+        let generation = sender_data.generation.to_object();
         let (key, nonce) = sender_key_source
             .find_keys(leaf_index, generation)
             .ok_or(Error("Unknown sender"))?;
@@ -842,7 +842,7 @@ impl<'a> PrivateMessageView<'a> {
             PrivateMessageContentAad,
             PrivateMessageContentAad {
                 group_id: self.group_id,
-                epoch: self.epoch.to_owned(),
+                epoch: self.epoch.to_object(),
                 content_type: CONTENT_TYPE_COMMIT,
                 authenticated_data: self.authenticated_data,
             }
@@ -857,22 +857,22 @@ impl<'a> PrivateMessageView<'a> {
             version: consts::SUPPORTED_VERSION,
             wire_format: consts::SUPPORTED_WIRE_FORMAT,
             content: FramedContent {
-                group_id: self.group_id.to_owned(),
-                epoch: self.epoch.to_owned(),
+                group_id: self.group_id.to_object(),
+                epoch: self.epoch.to_object(),
                 sender: Sender::Member(leaf_index),
-                authenticated_data: self.authenticated_data.to_owned(),
-                content: MessageContent::Commit(content.commit.to_owned()),
+                authenticated_data: self.authenticated_data.to_object(),
+                content: MessageContent::Commit(content.commit.to_object()),
             },
-            binder: FramedContentBinder::Member(group_context),
+            binder: FramedContentBinder::Member(group_context.clone()),
         };
         let tbs_raw = serialize!(FramedContentTbs, tbs);
 
         let signed_framed_content = SignedFramedContent {
             tbs,
             tbs_raw,
-            signature: content.signature.to_owned(),
+            signature: content.signature.to_object(),
         };
-        let confirmation_tag = content.confirmation_tag.to_owned();
+        let confirmation_tag = content.confirmation_tag.to_object();
 
         Ok((signed_framed_content, confirmation_tag))
     }

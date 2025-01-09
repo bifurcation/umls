@@ -55,10 +55,10 @@ pub trait AsView {
     fn as_view<'a>(&'a self) -> Self::View<'a>;
 }
 
-pub trait ToOwned {
-    type Owned: Serialize;
+pub trait ToObject {
+    type Object: Serialize;
 
-    fn to_owned(&self) -> Self::Owned;
+    fn to_object(&self) -> Self::Object;
 }
 
 // XXX(RLB) Note that these types can only be included in structs / enums if they are first wrapped
@@ -95,10 +95,10 @@ impl AsView for Nil {
     }
 }
 
-impl<'a> ToOwned for NilView<'a> {
-    type Owned = Nil;
+impl<'a> ToObject for NilView<'a> {
+    type Object = Nil;
 
-    fn to_owned(&self) -> Self::Owned {
+    fn to_object(&self) -> Self::Object {
         Nil
     }
 }
@@ -130,10 +130,10 @@ macro_rules! primitive_int_serde {
             }
         }
 
-        impl ToOwned for $int {
-            type Owned = $int;
+        impl ToObject for $int {
+            type Object = $int;
 
-            fn to_owned(&self) -> Self::Owned {
+            fn to_object(&self) -> Self::Object {
                 *self
             }
         }
@@ -210,10 +210,10 @@ macro_rules! mls_newtype_primitive {
             }
         }
 
-        impl<'a> ToOwned for $view_type<'a> {
-            type Owned = $owned_type;
+        impl<'a> ToObject for $view_type<'a> {
+            type Object = $owned_type;
 
-            fn to_owned(&self) -> Self::Owned {
+            fn to_object(&self) -> Self::Object {
                 $owned_type::from(self.0)
             }
         }
@@ -299,10 +299,10 @@ impl AsView for Varint {
     }
 }
 
-impl<'a> ToOwned for Varint {
-    type Owned = Varint;
+impl<'a> ToObject for Varint {
+    type Object = Varint;
 
-    fn to_owned(&self) -> Self::Owned {
+    fn to_object(&self) -> Self::Object {
         *self
     }
 }
@@ -357,11 +357,11 @@ impl<T: Serialize + AsView, const N: usize> AsView for Vec<T, N> {
     }
 }
 
-impl<'a, V: Deserialize<'a> + ToOwned, const N: usize> ToOwned for Vec<V, N> {
-    type Owned = Vec<V::Owned, N>;
+impl<'a, V: Deserialize<'a> + ToObject, const N: usize> ToObject for Vec<V, N> {
+    type Object = Vec<V::Object, N>;
 
-    fn to_owned(&self) -> Self::Owned {
-        self.iter().map(|v| v.to_owned()).collect()
+    fn to_object(&self) -> Self::Object {
+        self.iter().map(|v| v.to_object()).collect()
     }
 }
 
@@ -448,10 +448,10 @@ impl<const N: usize> AsView for Opaque<N> {
     }
 }
 
-impl<'a, const N: usize> ToOwned for OpaqueView<'a, N> {
-    type Owned = Opaque<N>;
+impl<'a, const N: usize> ToObject for OpaqueView<'a, N> {
+    type Object = Opaque<N>;
 
-    fn to_owned(&self) -> Self::Owned {
+    fn to_object(&self) -> Self::Object {
         // Unwrap is safe here because OpaqueView<N> can't be constructed with more than N elements
         Opaque(self.0.try_into().unwrap())
     }
@@ -564,11 +564,11 @@ macro_rules! mls_newtype_opaque {
             }
         }
 
-        impl<'a> ToOwned for $view_type<'a> {
-            type Owned = $owned_type;
+        impl<'a> ToObject for $view_type<'a> {
+            type Object = $owned_type;
 
-            fn to_owned(&self) -> Self::Owned {
-                $owned_type::from(self.0.to_owned())
+            fn to_object(&self) -> Self::Object {
+                $owned_type::from(self.0.to_object())
             }
         }
 
@@ -647,12 +647,12 @@ macro_rules! mls_struct {
             }
         }
 
-        impl<'a> ToOwned for $view_type<'a> {
-            type Owned = $owned_type;
+        impl<'a> ToObject for $view_type<'a> {
+            type Object = $owned_type;
 
-            fn to_owned(&self) -> Self::Owned {
-                Self::Owned {
-                    $($field_name: self.$field_name.to_owned(),)*
+            fn to_object(&self) -> Self::Object {
+                Self::Object {
+                    $($field_name: self.$field_name.to_object(),)*
                 }
             }
         }
@@ -707,12 +707,12 @@ macro_rules! mls_enum {
             }
         }
 
-        impl<'a> ToOwned for $view_type<'a> {
-            type Owned = $owned_type;
+        impl<'a> ToObject for $view_type<'a> {
+            type Object = $owned_type;
 
-            fn to_owned(&self) -> Self::Owned {
+            fn to_object(&self) -> Self::Object {
                 match self {
-                    $(Self::$variant_name(x) => Self::Owned::$variant_name(x.to_owned()),)*
+                    $(Self::$variant_name(x) => Self::Object::$variant_name(x.to_object()),)*
                 }
             }
         }
@@ -735,7 +735,7 @@ mod test {
         mut storage: Vec<u8, N>,
     ) where
         T: Serialize + AsView<View<'a> = V> + PartialEq + Debug + 'a,
-        V: Deserialize<'a> + ToOwned<Owned = T> + PartialEq + Debug,
+        V: Deserialize<'a> + ToObject<Object = T> + PartialEq + Debug,
     {
         // Serialization
         val.serialize(&mut storage).unwrap();
@@ -746,9 +746,9 @@ mod test {
         let deserialized = V::deserialize(&mut reader).unwrap();
         assert_eq!(&deserialized, view);
 
-        // AsView + ToOwned
+        // AsView + ToObject
         assert_eq!(val.as_view(), *view);
-        assert_eq!(view.to_owned(), *val);
+        assert_eq!(view.to_object(), *val);
     }
 
     #[test]

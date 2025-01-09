@@ -26,3 +26,20 @@ impl GroupState {
         self.epoch_secret.epoch_authenticator()
     }
 }
+
+impl SenderKeySource for GroupState {
+    fn find_keys<'a>(
+        &self,
+        sender: LeafIndex,
+        generation: Generation,
+    ) -> Option<(AeadKey, AeadNonce)> {
+        let (gen, key, nonce) = self
+            .epoch_secret
+            .handshake_key(sender, self.ratchet_tree.size());
+        if gen == *generation {
+            Some((key, nonce))
+        } else {
+            None
+        }
+    }
+}

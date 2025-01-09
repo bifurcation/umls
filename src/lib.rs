@@ -87,7 +87,7 @@ pub fn create_group(
 ) -> Result<GroupState> {
     // Construct the ratchet tree
     let mut ratchet_tree = RatchetTree::default();
-    ratchet_tree.add_leaf(key_package.leaf_node.to_owned())?;
+    ratchet_tree.add_leaf(key_package.leaf_node.to_object())?;
 
     // Generate a fresh epoch secret
     let mut epoch_secret = EpochSecret::default();
@@ -119,7 +119,7 @@ pub fn create_group(
         interim_transcript_hash,
         epoch_secret,
         my_index: LeafIndex(0),
-        my_signature_priv: key_package_priv.signature_priv.to_owned(),
+        my_signature_priv: key_package_priv.signature_priv.to_object(),
         ..Default::default()
     })
 }
@@ -130,7 +130,7 @@ pub fn join_group(
     welcome: WelcomeView,
 ) -> Result<GroupState> {
     // Verify that the Welcome is for us
-    let kp_ref = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package.to_owned())?;
+    let kp_ref = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package.to_object())?;
     if welcome.secrets[0].new_member != kp_ref.as_view() {
         return Err(Error("Misdirected Welcome"));
     }
@@ -157,10 +157,9 @@ pub fn join_group(
     let group_info = GroupInfoView::deserialize(&mut group_info_reader)?;
 
     // Extract the ratchet tree from an extension
-    let ratchet_tree_extension = group_info
-        .extensions
-        .iter()
-        .find(|ext| ext.extension_type.to_owned() == protocol::consts::EXTENSION_TYPE_RATCHET_TREE);
+    let ratchet_tree_extension = group_info.extensions.iter().find(|ext| {
+        ext.extension_type.to_object() == protocol::consts::EXTENSION_TYPE_RATCHET_TREE
+    });
 
     let Some(ratchet_tree_extension) = ratchet_tree_extension else {
         return Err(Error("Not implemented"));
@@ -169,7 +168,7 @@ pub fn join_group(
     let ratchet_tree_data = ratchet_tree_extension.extension_data;
     let mut ratchet_tree_reader = SliceReader::new(ratchet_tree_data.as_ref());
     let ratchet_tree = RatchetTreeView::deserialize(&mut ratchet_tree_reader)?;
-    let ratchet_tree = ratchet_tree.to_owned();
+    let ratchet_tree = ratchet_tree.to_object();
 
     let tree_hash = ratchet_tree.root_hash();
     if tree_hash.as_view() != group_info.group_context.tree_hash {
@@ -184,7 +183,7 @@ pub fn join_group(
     // Verify the signature on the GroupInfo
     {
         // Scoped to bound the lifetime of signer_leaf
-        let Some(signer_leaf) = ratchet_tree.leaf_node_at(group_info.signer.to_owned()) else {
+        let Some(signer_leaf) = ratchet_tree.leaf_node_at(group_info.signer.to_object()) else {
             return Err(Error("GroupInfo signer not present in tree"));
         };
 
@@ -192,7 +191,7 @@ pub fn join_group(
     }
 
     // Update the key schedule
-    let group_context = group_info.group_context.to_owned();
+    let group_context = group_info.group_context.to_object();
     let group_context_bytes = serialize!(GroupContext, group_context);
     let epoch_secret = member_secret.advance(&group_context_bytes);
 
@@ -207,7 +206,7 @@ pub fn join_group(
         interim_transcript_hash,
         epoch_secret,
         my_index,
-        my_signature_priv: key_package_priv.signature_priv.to_owned(),
+        my_signature_priv: key_package_priv.signature_priv.to_object(),
     })
 }
 
@@ -216,7 +215,7 @@ pub fn add_member(
     group_state: GroupStateView,
     key_package: KeyPackageView,
 ) -> Result<(GroupState, PrivateMessage, Welcome)> {
-    let mut next = group_state.to_owned();
+    let mut next = group_state.to_object();
 
     // Verify the KeyPackage and the LeafNode
     let joiner_signature_key = key_package.tbs.leaf_node.tbs.signature_key;
@@ -225,11 +224,11 @@ pub fn add_member(
 
     // Add the new member to the ratchet tree
     next.ratchet_tree
-        .add_leaf(key_package.leaf_node.to_owned())?;
+        .add_leaf(key_package.leaf_node.to_object())?;
 
     // Form the Commit and the enclosing SignedFramedContent
     let add = Add {
-        key_package: key_package.to_owned(),
+        key_package: key_package.to_object(),
     };
 
     let mut commit = Commit::default();
@@ -240,9 +239,9 @@ pub fn add_member(
 
     let authenticated_data = PrivateMessageAad::default();
     let framed_content = FramedContent {
-        group_id: group_state.group_context.group_id.to_owned(),
-        epoch: group_state.group_context.epoch.to_owned(),
-        sender: Sender::Member(group_state.my_index.to_owned()),
+        group_id: group_state.group_context.group_id.to_object(),
+        epoch: group_state.group_context.epoch.to_object(),
+        sender: Sender::Member(group_state.my_index.to_object()),
         authenticated_data: authenticated_data.clone(),
         content: MessageContent::Commit(commit),
     };
@@ -251,7 +250,7 @@ pub fn add_member(
         version: protocol::consts::SUPPORTED_VERSION,
         wire_format: protocol::consts::SUPPORTED_WIRE_FORMAT,
         content: framed_content,
-        binder: FramedContentBinder::Member(group_state.group_context.to_owned()),
+        binder: FramedContentBinder::Member(group_state.group_context.to_object()),
     };
 
     let signed_framed_content =
@@ -278,9 +277,10 @@ pub fn add_member(
     let confirmation_tag = next
         .epoch_secret
         .confirmation_tag(&next.group_context.confirmed_transcript_hash);
-    let (generation, key, nonce) = next
+    let (generation, key, nonce) = group_state
         .epoch_secret
-        .handshake_key(next.my_index, next.ratchet_tree.size());
+        .to_object()
+        .handshake_key(next.my_index, group_state.ratchet_tree.size());
 
     let sender_data = SenderData {
         leaf_index: next.my_index,
@@ -294,7 +294,11 @@ pub fn add_member(
         sender_data,
         key,
         nonce,
-        next.epoch_secret.sender_data_secret().as_view(),
+        group_state
+            .epoch_secret
+            .to_object()
+            .sender_data_secret()
+            .as_view(),
         authenticated_data,
     )?;
 
@@ -307,7 +311,7 @@ pub fn add_member(
 
     let encrypted_group_secrets =
         HpkeEncryptedGroupSecrets::seal(rng, group_secrets, key_package.init_key, &[])?;
-    let new_member = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package.to_owned())?;
+    let new_member = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package.to_object())?;
     let encrypted_group_secrets = EncryptedGroupSecrets {
         new_member,
         encrypted_group_secrets,
@@ -350,10 +354,72 @@ pub fn remove_member(
 }
 
 pub fn handle_commit(
-    _group_state: GroupStateView,
-    _commit: PrivateMessageView,
+    group_state: GroupStateView,
+    commit: PrivateMessageView,
 ) -> Result<GroupState> {
-    todo!();
+    // Take ownership of the group state
+    let mut next = group_state.to_object();
+
+    // Unwrap the PrivateMessage and verify its signature
+    let sender_data_secret = next.epoch_secret.sender_data_secret();
+    let (signed_framed_content, confirmation_tag_message) =
+        commit.open(&sender_data_secret, &next, &next.group_context)?;
+
+    let Sender::Member(sender) = signed_framed_content.content.sender;
+    {
+        let Some(signer_leaf) = next.ratchet_tree.leaf_node_at(sender) else {
+            return Err(Error("Commit signer not present in tree"));
+        };
+
+        signed_framed_content
+            .as_view()
+            .verify(signer_leaf.signature_key)?;
+    }
+
+    // Unwrap the Commit and apply it to the ratchet tree
+    let MessageContent::Commit(commit) = &signed_framed_content.content.content;
+
+    if commit.proposals.len() != 1 {
+        return Err(Error("Not implemented"));
+    }
+
+    let ProposalOrRef::Proposal(proposal) = &commit.proposals[0];
+
+    match proposal {
+        Proposal::Add(add) => next
+            .ratchet_tree
+            .add_leaf(add.key_package.leaf_node.clone())?,
+        Proposal::Remove(remove) => todo!(),
+    }
+
+    // Update the GroupContext
+    next.group_context.epoch.0 += 1;
+    next.group_context.tree_hash = next.ratchet_tree.root_hash();
+    next.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
+        group_state.interim_transcript_hash,
+        &signed_framed_content.content,
+        &signed_framed_content.signature,
+    )?;
+
+    // Ratchet forward the key schedule
+    let commit_secret = HashOutput::zero();
+    let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = group_state
+        .epoch_secret
+        .advance(commit_secret.as_view(), &next.group_context)?;
+
+    next.epoch_secret = epoch_secret;
+
+    // Verify the confirmation tag
+    let confirmation_tag_computed = next
+        .epoch_secret
+        .confirmation_tag(&next.group_context.confirmed_transcript_hash);
+
+    // XXX(RLB) Constant-time equality check?
+    if confirmation_tag_message != confirmation_tag_computed {
+        return Err(Error("Invalid confirmation tag"));
+    }
+
+    Ok(next)
 }
 
 #[cfg(test)]
@@ -364,12 +430,13 @@ mod test {
     fn test_create_group() {
         let mut rng = rand::thread_rng();
 
+        // Create initial state
         let (sig_priv, sig_key) = crypto::generate_sig(&mut rng).unwrap();
         let credential = Credential::from(b"alice".as_slice());
         let group_id = GroupId::from(Opaque::try_from(b"just alice".as_slice()).unwrap());
 
+        // Initialize the group
         let (kp_priv, kp) = make_key_package(&mut rng, sig_priv, sig_key, credential).unwrap();
-
         let _state_a0 = create_group(&mut rng, kp_priv.as_view(), kp.as_view(), group_id).unwrap();
     }
 
@@ -377,22 +444,26 @@ mod test {
     fn test_join_group() {
         let mut rng = rand::thread_rng();
 
+        // Create initial state
         let (sig_priv_a, sig_key_a) = crypto::generate_sig(&mut rng).unwrap();
         let credential_a = Credential::from(b"alice".as_slice());
 
         let (sig_priv_b, sig_key_b) = crypto::generate_sig(&mut rng).unwrap();
         let credential_b = Credential::from(b"bob".as_slice());
 
-        let group_id = GroupId::from(Opaque::try_from(b"just alice".as_slice()).unwrap());
+        let group_id = GroupId::from(Opaque::try_from(b"alice and bob".as_slice()).unwrap());
 
+        // Create key packages
         let (kp_priv_a, kp_a) =
             make_key_package(&mut rng, sig_priv_a, sig_key_a, credential_a).unwrap();
         let (kp_priv_b, kp_b) =
             make_key_package(&mut rng, sig_priv_b, sig_key_b, credential_b).unwrap();
 
+        // Initialize the group
         let state_a0 =
             create_group(&mut rng, kp_priv_a.as_view(), kp_a.as_view(), group_id).unwrap();
 
+        // Add the second member
         let (state_a1, _commit_a1, welcome_1) =
             add_member(&mut rng, state_a0.as_view(), kp_b.as_view()).unwrap();
 
@@ -400,5 +471,55 @@ mod test {
             join_group(kp_priv_b.as_view(), kp_b.as_view(), welcome_1.as_view()).unwrap();
 
         assert!(state_a1.epoch_authenticator() == state_b1.epoch_authenticator());
+    }
+
+    #[test]
+    fn test_three_member_group() {
+        let mut rng = rand::thread_rng();
+
+        // Create initial state
+        let (sig_priv_a, sig_key_a) = crypto::generate_sig(&mut rng).unwrap();
+        let credential_a = Credential::from(b"alice".as_slice());
+
+        let (sig_priv_b, sig_key_b) = crypto::generate_sig(&mut rng).unwrap();
+        let credential_b = Credential::from(b"bob".as_slice());
+
+        let (sig_priv_c, sig_key_c) = crypto::generate_sig(&mut rng).unwrap();
+        let credential_c = Credential::from(b"bob".as_slice());
+
+        let group_id = GroupId::from(Opaque::try_from(b"alice, bob, carol".as_slice()).unwrap());
+
+        // Create key packages
+        let (kp_priv_a, kp_a) =
+            make_key_package(&mut rng, sig_priv_a, sig_key_a, credential_a).unwrap();
+        let (kp_priv_b, kp_b) =
+            make_key_package(&mut rng, sig_priv_b, sig_key_b, credential_b).unwrap();
+        let (kp_priv_c, kp_c) =
+            make_key_package(&mut rng, sig_priv_c, sig_key_c, credential_c).unwrap();
+
+        // Initialize the group
+        let state_a0 =
+            create_group(&mut rng, kp_priv_a.as_view(), kp_a.as_view(), group_id).unwrap();
+
+        // Add the second member
+        let (state_a1, _commit_1, welcome_1) =
+            add_member(&mut rng, state_a0.as_view(), kp_b.as_view()).unwrap();
+
+        let state_b1 =
+            join_group(kp_priv_b.as_view(), kp_b.as_view(), welcome_1.as_view()).unwrap();
+
+        assert!(state_a1.epoch_authenticator() == state_b1.epoch_authenticator());
+
+        // Add the third member
+        let (state_b2, commit_2, welcome_2) =
+            add_member(&mut rng, state_b1.as_view(), kp_c.as_view()).unwrap();
+
+        let state_c2 =
+            join_group(kp_priv_c.as_view(), kp_c.as_view(), welcome_2.as_view()).unwrap();
+
+        let state_a2 = handle_commit(state_a1.as_view(), commit_2.as_view()).unwrap();
+
+        assert!(state_b2.epoch_authenticator() == state_a2.epoch_authenticator());
+        assert!(state_b2.epoch_authenticator() == state_c2.epoch_authenticator());
     }
 }
