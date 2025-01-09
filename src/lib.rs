@@ -103,7 +103,7 @@ pub fn create_group(
         cipher_suite: crypto::consts::CIPHER_SUITE,
         group_id,
         epoch: Epoch(0),
-        tree_hash: ratchet_tree.root_hash(),
+        tree_hash: ratchet_tree.root_hash()?,
         confirmed_transcript_hash: Default::default(),
         extensions: Default::default(),
     };
@@ -170,7 +170,7 @@ pub fn join_group(
     let ratchet_tree = RatchetTreeView::deserialize(&mut ratchet_tree_reader)?;
     let ratchet_tree = ratchet_tree.to_object();
 
-    let tree_hash = ratchet_tree.root_hash();
+    let tree_hash = ratchet_tree.root_hash()?;
     if tree_hash.as_view() != group_info.group_context.tree_hash {
         return Err(Error("Invalid ratchet tree"));
     }
@@ -258,7 +258,7 @@ pub fn add_member(
 
     // Update the GroupContext
     next.group_context.epoch.0 += 1;
-    next.group_context.tree_hash = next.ratchet_tree.root_hash();
+    next.group_context.tree_hash = next.ratchet_tree.root_hash()?;
     next.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
         group_state.interim_transcript_hash,
         &signed_framed_content.content,
@@ -398,7 +398,7 @@ pub fn handle_commit(
 
     // Update the GroupContext
     next.group_context.epoch.0 += 1;
-    next.group_context.tree_hash = next.ratchet_tree.root_hash();
+    next.group_context.tree_hash = next.ratchet_tree.root_hash()?;
     next.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
         group_state.interim_transcript_hash,
         &signed_framed_content.content,

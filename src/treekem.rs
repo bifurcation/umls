@@ -43,14 +43,22 @@ mls_struct! {
 }
 
 impl<'a> RatchetTreeView<'a> {
-    pub fn size(&self) -> usize {
-        self.nodes.len() / 2 + 1
+    pub fn size(&self) -> LeafCount {
+        NodeCount(self.nodes.len()).into()
     }
 }
 
 impl RatchetTree {
-    pub fn size(&self) -> usize {
-        self.nodes.len() / 2 + 1
+    fn node_at(&self, i: NodeIndex) -> &OptionalNode {
+        &self.nodes[i.0]
+    }
+
+    fn node_at_mut(&mut self, i: NodeIndex) -> &mut OptionalNode {
+        &mut self.nodes[i.0]
+    }
+
+    pub fn size(&self) -> LeafCount {
+        NodeCount(self.nodes.len()).into()
     }
 
     pub fn find(&self, leaf_node: LeafNodeView) -> Option<LeafIndex> {
@@ -63,8 +71,7 @@ impl RatchetTree {
     }
 
     pub fn leaf_node_at(&self, index: LeafIndex) -> Option<LeafNodeView> {
-        let index = 2 * index.0 as usize;
-        self.nodes[index].as_ref().and_then(|n| match n {
+        self.node_at(index.into()).as_ref().and_then(|n| match n {
             Node::Leaf(leaf_node) => Some(leaf_node.as_view()),
             Node::Parent(_) => None,
         })
@@ -72,10 +79,15 @@ impl RatchetTree {
 
     pub fn add_leaf(&mut self, leaf_node: LeafNode) -> Result<()> {
         // Assign to a blank leaf node if one exists
-        let blank = self.nodes.iter().step_by(2).position(|n| n.is_none());
+        let blank = self
+            .nodes
+            .iter()
+            .step_by(2)
+            .position(|n| n.is_none())
+            .map(|i| LeafIndex(i as u32));
         if let Some(index) = blank {
-            self.blank_path(2 * index);
-            self.nodes[2 * index] = Some(Node::Leaf(leaf_node));
+            self.blank_path(index);
+            *self.node_at_mut(index.into()) = Some(Node::Leaf(leaf_node));
             return Ok(());
         }
 
@@ -91,42 +103,42 @@ impl RatchetTree {
     }
 
     pub fn remove_leaf(&mut self, removed: LeafIndex) {
-        self.blank_path(removed.0 as usize);
+        self.blank_path(removed);
         self.truncate()
     }
 
-    pub fn root_hash(&self) -> HashOutput {
-        self.hash(root(self.nodes.len()))
+    pub fn root_hash(&self) -> Result<HashOutput> {
+        self.hash(self.size().root())
     }
 
-    fn hash(&self, index: usize) -> HashOutput {
-        if level(index) == 0 {
+    fn hash(&self, index: NodeIndex) -> Result<HashOutput> {
+        if index.is_leaf() {
             self.leaf_hash(index)
         } else {
             self.parent_hash(index)
         }
     }
 
-    fn leaf_hash(&self, index: usize) -> HashOutput {
+    fn leaf_hash(&self, index: NodeIndex) -> Result<HashOutput> {
         // struct {
         //     uint32 leaf_index;
         //     optional<LeafNode> leaf_node;
         // } LeafNodeHashInput;
         let mut h = Hash::new();
 
-        let leaf_index = (index / 2) as u32;
-        leaf_index.serialize(&mut h).unwrap();
+        let leaf_index = LeafIndex::try_from(index)?;
+        leaf_index.serialize(&mut h)?;
 
-        let optional_leaf = self.nodes[index].as_ref().and_then(|node| match node {
+        let optional_leaf = self.node_at(index).as_ref().and_then(|node| match node {
             Node::Leaf(leaf_node) => Some(leaf_node),
             Node::Parent(_) => unreachable!(),
         });
-        optional_leaf.serialize(&mut h).unwrap();
+        optional_leaf.serialize(&mut h)?;
 
-        h.finalize()
+        Ok(h.finalize())
     }
 
-    fn parent_hash(&self, index: usize) -> HashOutput {
+    fn parent_hash(&self, index: NodeIndex) -> Result<HashOutput> {
         // struct {
         //     optional<ParentNode> parent_node;
         //     opaque left_hash<V>;
@@ -134,16 +146,16 @@ impl RatchetTree {
         // } ParentNodeHashInput;
         let mut h = Hash::new();
 
-        let optional_parent = self.nodes[index].as_ref().and_then(|node| match node {
+        let optional_parent = self.node_at(index).as_ref().and_then(|node| match node {
             Node::Leaf(_) => unreachable!(),
             Node::Parent(parent_node) => Some(parent_node),
         });
-        optional_parent.serialize(&mut h).unwrap();
+        optional_parent.serialize(&mut h)?;
 
-        self.hash(left(index).unwrap()).serialize(&mut h).unwrap();
-        self.hash(right(index).unwrap()).serialize(&mut h).unwrap();
+        self.hash(index.left().unwrap())?.serialize(&mut h)?;
+        self.hash(index.right().unwrap())?.serialize(&mut h)?;
 
-        h.finalize()
+        Ok(h.finalize())
     }
 
     fn expand(&mut self) -> Result<()> {
@@ -153,12 +165,13 @@ impl RatchetTree {
             .map_err(|_| Error("Resize error"))
     }
 
-    fn blank_path(&mut self, leaf_index: usize) {
-        self.nodes[leaf_index] = None;
-        let mut p = parent(leaf_index, self.nodes.len());
+    fn blank_path(&mut self, leaf_index: LeafIndex) {
+        let node_index: NodeIndex = leaf_index.into();
+        *self.node_at_mut(node_index) = None;
+        let mut p = node_index.parent(self.size().into());
         while let Some(index) = p {
-            self.nodes[index] = None;
-            p = parent(index, self.nodes.len());
+            *self.node_at_mut(index) = None;
+            p = index.parent(self.size().into());
         }
     }
 

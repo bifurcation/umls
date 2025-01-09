@@ -144,13 +144,16 @@ impl EpochSecret {
     }
 
     // XXX(RLB) This can be done immutably because we only ever derive one secret per epoch
-    pub fn handshake_key(&self, index: LeafIndex, group_size: usize) -> (u32, AeadKey, AeadNonce) {
-        let leaf = 2 * index.0 as usize;
-        let mut parent = root(group_size);
+    pub fn handshake_key(
+        &self,
+        index: LeafIndex,
+        group_size: LeafCount,
+    ) -> (u32, AeadKey, AeadNonce) {
+        let mut parent = group_size.root();
         let mut tree_secret = crypto::derive_secret(self.as_view().into(), b"encryption");
 
         loop {
-            let Some(next) = step_towards(parent, leaf) else {
+            let Some(next) = parent.step_towards(index) else {
                 break;
             };
 
