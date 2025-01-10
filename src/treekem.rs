@@ -58,6 +58,20 @@ impl RatchetTreePriv {
         })
     }
 
+    pub fn blank_path(&mut self, my_index: LeafIndex, removed: LeafIndex, width: NodeCount) {
+        let mut curr: Option<NodeIndex> = Some(my_index.into());
+        curr = curr.unwrap().parent(width);
+
+        for ps in self.path_secrets.iter_mut() {
+            let parent = curr.unwrap();
+            if parent.is_above_or_eq(removed) {
+                *ps = None;
+            }
+
+            curr = parent.parent(width);
+        }
+    }
+
     pub fn commit_secret(&self) -> Result<HashOutput> {
         let path_secret = self
             .path_secrets
@@ -150,8 +164,7 @@ impl RatchetTree {
         })
     }
 
-    // TODO(RLB) Add leaf to unmerged_leaves in any non-blank parent nodes
-    pub fn add_leaf(&mut self, leaf_node: LeafNode) -> Result<()> {
+    pub fn add_leaf(&mut self, leaf_node: LeafNode) -> Result<LeafIndex> {
         // Assign to a blank leaf node if one exists
         let blank = self
             .nodes
@@ -191,12 +204,17 @@ impl RatchetTree {
             parent_node.unmerged_leaves.push(joiner_leaf).unwrap();
         }
 
-        Ok(())
+        Ok(joiner_leaf)
     }
 
-    pub fn remove_leaf(&mut self, removed: LeafIndex) {
+    pub fn remove_leaf(&mut self, removed: LeafIndex) -> Result<()> {
+        if self.node_at(removed.into()).is_none() {
+            return Err(Error("Member not in group"));
+        }
+
         self.blank_path(removed);
-        self.truncate()
+        self.truncate();
+        Ok(())
     }
 
     pub fn root_hash(&self) -> Result<HashOutput> {
@@ -351,13 +369,14 @@ impl RatchetTree {
         let path = self.resolve_path(from);
         let group_context = serialize!(GroupContext, group_context);
 
-        println!("encap ctx = {}", hex::encode(&group_context));
-
         let filtered_priv = ratchet_tree_priv
             .path_secrets
             .iter()
             .filter_map(|ps| ps.as_ref());
-        let resolutions = path.iter().map(|(_, res)| res);
+        let resolutions = path
+            .iter()
+            .map(|(_, res)| res)
+            .filter(|res| !res.is_empty());
         let encrypted_path_secret = update_path
             .nodes
             .iter_mut()
@@ -385,6 +404,19 @@ impl RatchetTree {
         Ok(update_path)
     }
 
+    pub fn select_path_secret(
+        &self,
+        ratchet_tree_priv: &RatchetTreePriv,
+        from: LeafIndex,
+        to: LeafIndex,
+    ) -> Result<HashOutput> {
+        let path = self.resolve_path(from);
+        let parent_index = path.iter().position(|(n, _)| n.is_above_or_eq(to)).unwrap();
+        ratchet_tree_priv.path_secrets[parent_index]
+            .clone()
+            .ok_or(Error("Missing path secret"))
+    }
+
     pub fn decap(
         &mut self,
         ratchet_tree_priv: &mut RatchetTreePriv,
@@ -395,8 +427,6 @@ impl RatchetTree {
     ) -> Result<()> {
         let path = self.resolve_path(from);
         let group_context = serialize!(GroupContext, group_context);
-
-        println!("decap ctx = {}", hex::encode(&group_context));
 
         // Identify the path secret to decrypt, and where in the path to implant it.
         let path_index = path
@@ -458,6 +488,7 @@ impl RatchetTree {
         let end = ratchet_tree_priv.path_secrets.len();
         for i in start..end {
             if path[i].1.is_empty() {
+                ratchet_tree_priv.path_secrets[i] = None;
                 continue;
             }
 

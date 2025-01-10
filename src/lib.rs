@@ -1,4 +1,4 @@
-//#![no_std]
+#![no_std]
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
@@ -216,21 +216,43 @@ pub fn join_group(
     })
 }
 
-pub fn add_member(
+pub enum Operation {
+    Add(KeyPackage),
+    Remove(LeafIndex),
+}
+
+pub fn send_commit(
     rng: &mut (impl Rng + CryptoRngCore),
     group_state: GroupStateView,
-    key_package: KeyPackageView,
-) -> Result<(GroupState, PrivateMessage, Welcome)> {
+    operation: Operation,
+) -> Result<(GroupState, PrivateMessage, Option<Welcome>)> {
     let mut next = group_state.to_object();
 
-    // Verify the KeyPackage and the LeafNode
-    let joiner_signature_key = key_package.tbs.leaf_node.tbs.signature_key;
-    key_package.verify(joiner_signature_key)?;
-    key_package.tbs.leaf_node.verify(joiner_signature_key)?;
+    // Apply the operation and return the proposal that will communicate it
+    let (proposal, joiner_location) = match operation {
+        Operation::Add(key_package) => {
+            // Verify the KeyPackage and the LeafNode
+            let signature_key = key_package.tbs.leaf_node.tbs.signature_key.as_view();
+            key_package.as_view().verify(signature_key)?;
+            key_package.tbs.leaf_node.as_view().verify(signature_key)?;
 
-    // Add the new member to the ratchet tree
-    next.ratchet_tree
-        .add_leaf(key_package.leaf_node.to_object())?;
+            // Add the joiner to the tree
+            let joiner_location = next.ratchet_tree.add_leaf(key_package.leaf_node.clone())?;
+
+            (Proposal::Add(Add { key_package }), Some(joiner_location))
+        }
+        Operation::Remove(removed) => {
+            // Remove the member from the tree
+            next.ratchet_tree.remove_leaf(removed)?;
+            next.my_ratchet_tree_priv.blank_path(
+                next.my_index,
+                removed,
+                next.ratchet_tree.size().into(),
+            );
+
+            (Proposal::Remove(Remove { removed }), None)
+        }
+    };
 
     // Update the committer's direct path
     let (ratchet_tree_priv, update_path) = next.ratchet_tree.update_direct_path(
@@ -256,17 +278,13 @@ pub fn add_member(
     next.my_ratchet_tree_priv = ratchet_tree_priv;
 
     // Form the Commit and the enclosing SignedFramedContent
-    let add = Add {
-        key_package: key_package.to_object(),
-    };
-
     let mut commit = Commit {
         path: Some(update_path),
         proposals: Default::default(),
     };
     commit
         .proposals
-        .push(ProposalOrRef::Proposal(Proposal::Add(add)))
+        .push(ProposalOrRef::Proposal(proposal.clone()))
         .map_err(|_| Error("Too many entries"))?;
 
     let authenticated_data = PrivateMessageAad::default();
@@ -336,45 +354,60 @@ pub fn add_member(
         authenticated_data,
     )?;
 
-    // Form the Welcome
-    let group_secrets = GroupSecrets {
-        joiner_secret,
-        path_secret: None,
-        psks: Default::default(),
-    };
+    // Form the Welcome if required
+    let welcome = if let Proposal::Add(Add { key_package }) = &proposal {
+        let joiner_location = joiner_location.unwrap();
+        let path_secret = next.ratchet_tree.select_path_secret(
+            &next.my_ratchet_tree_priv,
+            next.my_index,
+            joiner_location,
+        )?;
 
-    let encrypted_group_secrets =
-        HpkeEncryptedGroupSecrets::seal(rng, group_secrets, key_package.init_key, &[])?;
-    let new_member = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package.to_object())?;
-    let encrypted_group_secrets = EncryptedGroupSecrets {
-        new_member,
-        encrypted_group_secrets,
-    };
+        let group_secrets = GroupSecrets {
+            joiner_secret,
+            path_secret: Some(path_secret),
+            psks: Default::default(),
+        };
 
-    let secrets = [encrypted_group_secrets].as_ref().try_into().unwrap();
+        let encrypted_group_secrets = HpkeEncryptedGroupSecrets::seal(
+            rng,
+            group_secrets,
+            key_package.init_key.as_view(),
+            &[],
+        )?;
+        let new_member = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", key_package)?;
+        let encrypted_group_secrets = EncryptedGroupSecrets {
+            new_member,
+            encrypted_group_secrets,
+        };
 
-    let ratchet_tree_data = serialize!(RatchetTree, next.ratchet_tree);
-    let ratchet_tree_extension = GroupInfoExtension {
-        extension_type: protocol::consts::EXTENSION_TYPE_RATCHET_TREE,
-        extension_data: Opaque(ratchet_tree_data).into(),
-    };
-    let group_info_extensions = [ratchet_tree_extension].as_ref().try_into().unwrap();
+        let secrets = [encrypted_group_secrets].as_ref().try_into().unwrap();
 
-    let group_info_tbs = GroupInfoTbs {
-        group_context: next.group_context.clone(),
-        extensions: group_info_extensions,
-        confirmation_tag: confirmation_tag.clone(),
-        signer: next.my_index,
-    };
+        let ratchet_tree_data = serialize!(RatchetTree, next.ratchet_tree);
+        let ratchet_tree_extension = GroupInfoExtension {
+            extension_type: protocol::consts::EXTENSION_TYPE_RATCHET_TREE,
+            extension_data: Opaque(ratchet_tree_data).into(),
+        };
+        let group_info_extensions = [ratchet_tree_extension].as_ref().try_into().unwrap();
 
-    let group_info = GroupInfo::new(group_info_tbs, next.my_signature_priv.as_view())?;
-    let encrypted_group_info =
-        EncryptedGroupInfo::seal(group_info, welcome_key, welcome_nonce, &[])?;
+        let group_info_tbs = GroupInfoTbs {
+            group_context: next.group_context.clone(),
+            extensions: group_info_extensions,
+            confirmation_tag: confirmation_tag.clone(),
+            signer: next.my_index,
+        };
 
-    let welcome = Welcome {
-        cipher_suite: crypto::consts::CIPHER_SUITE,
-        secrets,
-        encrypted_group_info,
+        let group_info = GroupInfo::new(group_info_tbs, next.my_signature_priv.as_view())?;
+        let encrypted_group_info =
+            EncryptedGroupInfo::seal(group_info, welcome_key, welcome_nonce, &[])?;
+
+        Some(Welcome {
+            cipher_suite: crypto::consts::CIPHER_SUITE,
+            secrets,
+            encrypted_group_info,
+        })
+    } else {
+        None
     };
 
     Ok((next, private_message, welcome))
@@ -420,10 +453,18 @@ pub fn handle_commit(
     let ProposalOrRef::Proposal(proposal) = &commit.proposals[0];
 
     match proposal {
-        Proposal::Add(add) => next
-            .ratchet_tree
-            .add_leaf(add.key_package.leaf_node.clone())?,
-        Proposal::Remove(remove) => todo!(),
+        Proposal::Add(add) => {
+            next.ratchet_tree
+                .add_leaf(add.key_package.leaf_node.clone())?;
+        }
+        Proposal::Remove(remove) => {
+            next.ratchet_tree.remove_leaf(remove.removed)?;
+            next.my_ratchet_tree_priv.blank_path(
+                next.my_index,
+                remove.removed,
+                next.ratchet_tree.size().into(),
+            );
+        }
     }
 
     // Merge the update path into the tree
@@ -513,12 +554,13 @@ mod test {
             let mut rng = rand::thread_rng();
 
             let (kp_priv, kp) = make_user(&mut rng, joiner_name);
+            let op = Operation::Add(kp.clone());
 
             let committer_prev = self.states[committer].take().unwrap();
             let (committer_next, commit, welcome) =
-                add_member(&mut rng, committer_prev.as_view(), kp.as_view()).unwrap();
+                send_commit(&mut rng, committer_prev.as_view(), op).unwrap();
             let joiner_next =
-                join_group(kp_priv.as_view(), kp.as_view(), welcome.as_view()).unwrap();
+                join_group(kp_priv.as_view(), kp.as_view(), welcome.unwrap().as_view()).unwrap();
 
             // Everyone in the group handles the commit (note that committer is currently None)
             for state in self.states.iter_mut().filter(|s| s.is_some()) {
@@ -540,6 +582,29 @@ mod test {
             };
 
             self.states[joiner] = Some(joiner_next);
+        }
+
+        fn remove(&mut self, committer: usize, removed: usize) {
+            let mut rng = rand::thread_rng();
+
+            let op = Operation::Remove(LeafIndex(removed as u32));
+
+            let committer_prev = self.states[committer].take().unwrap();
+            let (committer_next, commit, welcome) =
+                send_commit(&mut rng, committer_prev.as_view(), op).unwrap();
+
+            // Remove the removed member
+            self.states[removed] = None;
+
+            // Everyone in the group handles the commit (note that committer is currently None)
+            for state in self.states.iter_mut().filter(|s| s.is_some()) {
+                let prev = state.take().unwrap();
+                let next = handle_commit(prev.as_view(), commit.as_view()).unwrap();
+                *state = Some(next);
+            }
+
+            // Committer transitions to a new state
+            self.states[committer] = Some(committer_next);
         }
 
         fn check(&self) {
@@ -577,6 +642,19 @@ mod test {
         group.check();
 
         group.add(1, b"carol");
+        group.check();
+    }
+
+    #[test]
+    fn test_remove() {
+        let mut group = TestGroup::new(b"alice, bob, carol", b"alice");
+        group.add(0, b"bob");
+        group.check();
+
+        group.add(1, b"carol");
+        group.check();
+
+        group.remove(2, 0);
         group.check();
     }
 }

@@ -558,7 +558,8 @@ pub fn aead_open<const N: usize>(
 
     let aead = Aes128Gcm::new(key);
     aead.decrypt_in_place_detached(nonce, aad, &mut inner_pt, tag.into())
-        .map_err(|_| Error("AEAD error"))?;
+        .map_err(|_| Error("AEAD error"))
+        .unwrap(); // XXX
 
     pt.clear();
     pt.extend_from_slice(&inner_pt).unwrap();
