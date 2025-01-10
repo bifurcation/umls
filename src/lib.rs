@@ -108,6 +108,11 @@ pub fn create_group(
     let interim_transcript_hash =
         transcript_hash::interim(&group_context.confirmed_transcript_hash, &confirmation_tag)?;
 
+    let my_ratchet_tree_priv = RatchetTreePriv {
+        encryption_priv: key_package_priv.encryption_priv.to_object(),
+        ..Default::default()
+    };
+
     Ok(GroupState {
         ratchet_tree,
         group_context,
@@ -115,7 +120,7 @@ pub fn create_group(
         epoch_secret,
         my_index: LeafIndex(0),
         my_signature_priv: key_package_priv.signature_priv.to_object(),
-        ..Default::default()
+        my_ratchet_tree_priv,
     })
 }
 
@@ -204,6 +209,8 @@ pub fn join_group(
         key_package_priv.encryption_priv,
     )?;
 
+    assert!(my_ratchet_tree_priv.consistent(&ratchet_tree, my_index));
+
     // Import the data into a GroupState
     Ok(GroupState {
         ratchet_tree,
@@ -277,6 +284,10 @@ pub fn send_commit(
 
     next.my_ratchet_tree_priv = ratchet_tree_priv;
 
+    assert!(next
+        .my_ratchet_tree_priv
+        .consistent(&next.ratchet_tree, next.my_index));
+
     // Form the Commit and the enclosing SignedFramedContent
     let mut commit = Commit {
         path: Some(update_path),
@@ -314,7 +325,7 @@ pub fn send_commit(
     )?;
 
     // Ratchet forward the key schedule
-    let commit_secret = next.my_ratchet_tree_priv.commit_secret()?;
+    let commit_secret = next.my_ratchet_tree_priv.commit_secret();
     let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = group_state
         .epoch_secret
         .advance(commit_secret.as_view(), &next.group_context)?;
@@ -486,6 +497,10 @@ pub fn handle_commit(
         &next.group_context,
     )?;
 
+    assert!(next
+        .my_ratchet_tree_priv
+        .consistent(&next.ratchet_tree, next.my_index));
+
     // Update the confirmed transcript hash
     next.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
         group_state.interim_transcript_hash,
@@ -494,7 +509,7 @@ pub fn handle_commit(
     )?;
 
     // Ratchet forward the key schedule
-    let commit_secret = next.my_ratchet_tree_priv.commit_secret()?;
+    let commit_secret = next.my_ratchet_tree_priv.commit_secret();
     let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = group_state
         .epoch_secret
         .advance(commit_secret.as_view(), &next.group_context)?;
@@ -523,6 +538,8 @@ pub fn handle_commit(
 mod test {
     use super::*;
 
+    use rand::{seq::SliceRandom, SeedableRng};
+
     fn make_user(
         rng: &mut (impl CryptoRngCore + Rng),
         name: &[u8],
@@ -534,6 +551,7 @@ mod test {
 
     struct TestGroup {
         states: Vec<Option<GroupState>, 10>,
+        op_count: u64,
     }
 
     impl TestGroup {
@@ -547,10 +565,13 @@ mod test {
 
             let mut states = Vec::new();
             states.push(Some(state)).unwrap();
-            Self { states }
+            Self {
+                states,
+                op_count: 0,
+            }
         }
 
-        fn add(&mut self, committer: usize, joiner_name: &[u8]) {
+        fn add(&mut self, committer: usize, joiner_name: &[u8]) -> usize {
             let mut rng = rand::thread_rng();
 
             let (kp_priv, kp) = make_user(&mut rng, joiner_name);
@@ -582,6 +603,8 @@ mod test {
             };
 
             self.states[joiner] = Some(joiner_next);
+
+            joiner
         }
 
         fn remove(&mut self, committer: usize, removed: usize) {
@@ -605,6 +628,33 @@ mod test {
 
             // Committer transitions to a new state
             self.states[committer] = Some(committer_next);
+        }
+
+        fn random_action(&mut self) {
+            self.op_count += 1;
+            let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(self.op_count);
+
+            let roll: usize = rng.gen_range(0..protocol::consts::MAX_GROUP_SIZE);
+
+            let members: Vec<usize, { protocol::consts::MAX_GROUP_SIZE }> = self
+                .states
+                .iter()
+                .enumerate()
+                .filter(|(i, s)| s.is_some())
+                .map(|(i, s)| i)
+                .collect();
+
+            if members.contains(&roll) && members.len() != 1 {
+                let mut committer = members.choose(&mut rng).unwrap();
+                while *committer == roll {
+                    committer = members.choose(&mut rng).unwrap();
+                }
+
+                self.remove(*committer, roll);
+            } else {
+                let committer = members.choose(&mut rng).unwrap();
+                let joiner = self.add(*committer, b"anonymous");
+            }
         }
 
         fn check(&self) {
@@ -656,5 +706,49 @@ mod test {
 
         group.remove(2, 0);
         group.check();
+    }
+
+    #[test]
+    fn test_large_group() {
+        let mut group = TestGroup::new(b"big group", b"alice");
+
+        for i in 1..protocol::consts::MAX_GROUP_SIZE {
+            group.add(i - 1, b"bob");
+            group.check();
+        }
+    }
+
+    #[test]
+    fn unmerged_leaves() {
+        // Create a group of 4 members
+        let mut group = TestGroup::new(b"big group", b"alice");
+
+        for i in 1..5 {
+            group.add(i - 1, b"bob");
+            group.check();
+        }
+
+        // Remove members to cerate blanks in the tree (only the outer nodes are filled)
+        group.remove(0, 1);
+        group.check();
+
+        // Add a new member at position 1.  This sets an unmerged leaf on node 3
+        group.add(4, b"carol");
+        group.check();
+
+        // Add a new member at position 5.  This requires encrypting to the unmerged leaf.
+        group.add(4, b"david");
+        group.check();
+    }
+
+    #[test]
+    fn test_random_ops() {
+        const STEPS: usize = 100;
+
+        let mut group = TestGroup::new(b"bizarro world", b"alice");
+        for _i in 0..STEPS {
+            group.random_action();
+            group.check();
+        }
     }
 }

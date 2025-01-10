@@ -368,6 +368,15 @@ pub fn derive_hpke(seed: HashOutputView) -> Result<(HpkePrivateKey, HpkePublicKe
     Ok((hpke_priv, hpke_key))
 }
 
+pub fn hpke_priv_to_pub(hpke_priv: &HpkePrivateKey) -> HpkePublicKey {
+    let priv_bytes: [u8; 32] = hpke_priv.as_ref().try_into().unwrap();
+
+    let raw_priv = StaticSecret::from(priv_bytes);
+    let raw_pub = PublicKey::from(&raw_priv);
+
+    HpkePublicKey::try_from(raw_pub.as_bytes().as_ref()).unwrap()
+}
+
 mod hpke {
     use super::*;
 
