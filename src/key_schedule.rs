@@ -153,7 +153,7 @@ impl EpochSecret {
         let mut tree_secret = crypto::derive_secret(self.as_view().into(), b"encryption");
 
         loop {
-            let Some(next) = parent.step_towards(index) else {
+            let Some(next) = parent.dirpath_child(index) else {
                 break;
             };
 
@@ -184,7 +184,7 @@ impl JoinerSecret {
 
 impl<'a> JoinerSecretView<'a> {
     pub fn advance(self) -> MemberSecret {
-        let psk_secret = HashOutput::zero();
+        let psk_secret = HashOutput(Opaque::zero());
         crypto::extract(self.into(), psk_secret.as_view()).into()
     }
 }

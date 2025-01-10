@@ -366,7 +366,111 @@ impl<'a, V: Deserialize<'a> + ToObject, const N: usize> ToObject for Vec<V, N> {
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
+pub struct Raw<const N: usize>(Vec<u8, N>);
+
+impl<const N: usize> From<Vec<u8, N>> for Raw<N> {
+    fn from(val: Vec<u8, N>) -> Self {
+        Self(val)
+    }
+}
+
+impl<const N: usize> TryFrom<&[u8]> for Raw<N> {
+    type Error = Error;
+
+    fn try_from(val: &[u8]) -> Result<Self> {
+        (val.len() == N)
+            .then_some(Self(Vec::try_from(val).unwrap()))
+            .ok_or(Error("Invalid object"))
+    }
+}
+
+impl<const N: usize> AsRef<[u8]> for Raw<N> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl<const N: usize> AsMut<[u8]> for Raw<N> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.0.as_mut()
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct RawView<'a, const N: usize>(&'a [u8]);
+
+impl<'a, const N: usize> TryFrom<&'a [u8]> for RawView<'a, N> {
+    type Error = Error;
+
+    fn try_from(val: &'a [u8]) -> Result<Self> {
+        (val.len() == N)
+            .then_some(Self(val))
+            .ok_or(Error("Too many items"))
+    }
+}
+
+impl<'a, const N: usize> AsRef<[u8]> for RawView<'a, N> {
+    fn as_ref(&self) -> &[u8] {
+        self.0
+    }
+}
+
+impl<const N: usize> Serialize for Raw<N> {
+    const MAX_SIZE: usize = N;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        if self.0.len() != N {
+            return Err(Error("Invalid object"));
+        }
+
+        writer.write(&self.0)
+    }
+}
+
+impl<'a, const N: usize> Serialize for RawView<'a, N> {
+    const MAX_SIZE: usize = N;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        if self.0.len() != N {
+            return Err(Error("Invalid object"));
+        }
+
+        writer.write(self.0)
+    }
+}
+
+impl<'a, const N: usize> Deserialize<'a> for RawView<'a, N> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        let content = reader.read_ref(N)?;
+        Self::try_from(content)
+    }
+}
+
+impl<const N: usize> AsView for Raw<N> {
+    type View<'a> = RawView<'a, N>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        RawView(&self.0)
+    }
+}
+
+impl<'a, const N: usize> ToObject for RawView<'a, N> {
+    type Object = Raw<N>;
+
+    fn to_object(&self) -> Self::Object {
+        // Unwrap is safe here because RawView<N> can't be constructed with more than N elements
+        Raw(self.0.try_into().unwrap())
+    }
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct Opaque<const N: usize>(pub Vec<u8, N>);
+
+impl<const N: usize> From<Raw<N>> for Opaque<N> {
+    fn from(val: Raw<N>) -> Self {
+        Opaque(val.0)
+    }
+}
 
 impl<const N: usize> From<Vec<u8, N>> for Opaque<N> {
     fn from(val: Vec<u8, N>) -> Self {
@@ -483,7 +587,7 @@ pub const fn max(array: &[usize]) -> usize {
 macro_rules! mls_newtype_opaque {
     ($owned_type:ident + $view_type:ident, $size:expr) => {
         #[derive(Clone, Default, Debug, PartialEq)]
-        pub struct $owned_type(Opaque<{ $size }>);
+        pub struct $owned_type(pub Opaque<{ $size }>);
 
         impl From<Opaque<{ $size }>> for $owned_type {
             fn from(val: Opaque<{ $size }>) -> Self {
@@ -512,7 +616,7 @@ macro_rules! mls_newtype_opaque {
         }
 
         #[derive(Copy, Clone, Debug, PartialEq)]
-        pub struct $view_type<'a>(OpaqueView<'a, { $size }>);
+        pub struct $view_type<'a>(pub OpaqueView<'a, { $size }>);
 
         impl<'a> From<OpaqueView<'a, { $size }>> for $view_type<'a> {
             fn from(val: OpaqueView<'a, { $size }>) -> Self {

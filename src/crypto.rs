@@ -9,6 +9,7 @@ use core::ops::{Deref, DerefMut};
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use heapless::Vec;
 use hmac::{digest::FixedOutput, Mac, SimpleHmac};
+use rand::{Fill, Rng};
 use rand_core::CryptoRngCore;
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -88,16 +89,23 @@ mls_newtype_opaque! {
     consts::SIGNATURE_SIZE
 }
 
-pub trait Zero {
+pub trait Constructors {
     fn zero() -> Self;
+    fn random(rng: &mut (impl CryptoRngCore + Rng)) -> Self;
 }
 
-impl Zero for HashOutput {
+impl<const N: usize> Constructors for Opaque<N> {
     fn zero() -> Self {
-        let mut hash_output = Self::default();
-        let vec = &mut hash_output.0 .0;
+        let mut opaque = Self::default();
+        let vec = &mut opaque.0;
         vec.resize_default(consts::HASH_OUTPUT_SIZE).unwrap();
-        hash_output
+        opaque
+    }
+
+    fn random(rng: &mut (impl CryptoRngCore + Rng)) -> Self {
+        let mut opaque = Self::zero();
+        opaque.as_mut().try_fill(rng).unwrap();
+        opaque
     }
 }
 
@@ -343,6 +351,10 @@ pub fn generate_hpke(rng: &mut impl CryptoRngCore) -> Result<(HpkePrivateKey, Hp
     let hpke_key = HpkePublicKey::try_from(raw_pub.as_bytes().as_ref()).unwrap();
 
     Ok((hpke_priv, hpke_key))
+}
+
+pub fn derive_hpke(seed: HashOutputView) -> Result<(HpkePrivateKey, HpkePublicKey)> {
+    todo!()
 }
 
 mod hpke {

@@ -40,7 +40,7 @@ pub mod consts {
     pub const MAX_PROPOSALS_PER_COMMIT: usize = 1;
 
     pub const MAX_GROUP_SIZE: usize = 8;
-    pub const MAX_UPDATE_PATH_LENGTH: usize = (MAX_GROUP_SIZE.ilog2() as usize) + 1;
+    pub const MAX_TREE_DEPTH: usize = (MAX_GROUP_SIZE.ilog2() as usize) + 1;
 
     pub const EXTENSION_TYPE_RATCHET_TREE: ExtensionType = ExtensionType(0x0002);
 }
@@ -541,15 +541,27 @@ mls_struct! {
 }
 
 // PrivateMessage
+type RawPathSecret = Raw<{ crypto::consts::HASH_OUTPUT_SIZE }>;
+type RawPathSecretView<'a> = RawView<'a, { crypto::consts::HASH_OUTPUT_SIZE }>;
+
 mls_encrypted! {
-    EncryptedPathSecret + EncryptedPathSecretView,
-    HashOutput + HashOutputView,
+    AeadEncryptedPathSecret + AeadEncryptedPathSecretView,
+    RawPathSecret + RawPathSecretView,
 }
+
+mls_hpke_encrypted! {
+    EncryptedPathSecret + EncryptedPathSecretView,
+    AeadEncryptedPathSecret + AeadEncryptedPathSecretView,
+    RawPathSecret + RawPathSecretView,
+}
+
+type EncryptedPathSecretList = Vec<EncryptedPathSecret, { consts::MAX_TREE_DEPTH }>;
+type EncryptedPathSecretListView<'a> = Vec<EncryptedPathSecretView<'a>, { consts::MAX_TREE_DEPTH }>;
 
 mls_struct! {
     UpdatePathNode + UpdatePathNodeView,
     encryption_key: HpkePublicKey + HpkePublicKeyView,
-    encrypted_path_secret: EncryptedPathSecret + EncryptedPathSecretView,
+    encrypted_path_secret: EncryptedPathSecretList + EncryptedPathSecretListView,
 }
 
 type UpdatePathNodeList = Vec<UpdatePathNode, { consts::MAX_PROPOSALS_PER_COMMIT }>;

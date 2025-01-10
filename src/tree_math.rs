@@ -51,7 +51,13 @@ impl NodeIndex {
         (k != 0).then_some(Self(self.0 ^ (0b11 << (k - 1))))
     }
 
-    pub fn step_towards(&self, leaf: LeafIndex) -> Option<Self> {
+    // This function will return an out-of-bounds index if applied to the root.
+    fn sibling_unchecked(&self) -> Self {
+        let k = self.level();
+        Self(self.0 ^ (0b10 << k))
+    }
+
+    pub fn dirpath_child(&self, leaf: LeafIndex) -> Option<Self> {
         let leaf = NodeIndex::from(leaf);
         let k = self.level();
 
@@ -63,6 +69,16 @@ impl NodeIndex {
         let mask = 1 << k;
         let clear = 0b1 << (k - 1);
         Some(Self((self.0 & !mask) ^ clear ^ (leaf.0 & mask)))
+    }
+
+    pub fn copath_child(&self, leaf: LeafIndex) -> Option<Self> {
+        self.dirpath_child(leaf).map(|n| n.sibling_unchecked())
+    }
+
+    pub fn is_above_or_eq(&self, leaf: LeafIndex) -> bool {
+        let leaf = NodeIndex::from(leaf);
+        let k = self.level();
+        k > 0 && (self.0 >> (k + 1)) == (leaf.0 >> (k + 1))
     }
 }
 

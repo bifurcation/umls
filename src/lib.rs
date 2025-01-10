@@ -23,7 +23,7 @@ use syntax::*;
 use treekem::*;
 
 use heapless::Vec;
-use rand::{Fill, Rng};
+use rand::Rng;
 use rand_core::CryptoRngCore;
 
 pub fn make_key_package(
@@ -90,12 +90,7 @@ pub fn create_group(
     ratchet_tree.add_leaf(key_package.leaf_node.to_object())?;
 
     // Generate a fresh epoch secret
-    let mut epoch_secret = EpochSecret::default();
-    epoch_secret
-        .0
-        .resize_default(crypto::consts::HASH_OUTPUT_SIZE)
-        .unwrap();
-    epoch_secret.as_mut().try_fill(rng).unwrap();
+    let epoch_secret = EpochSecret::from(Opaque::random(rng));
 
     // Set the group context
     let group_context = GroupContext {
@@ -266,7 +261,7 @@ pub fn add_member(
     )?;
 
     // Ratchet forward the key schedule
-    let commit_secret = HashOutput::zero();
+    let commit_secret = HashOutput(Opaque::zero());
     let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = group_state
         .epoch_secret
         .advance(commit_secret.as_view(), &next.group_context)?;
@@ -406,7 +401,7 @@ pub fn handle_commit(
     )?;
 
     // Ratchet forward the key schedule
-    let commit_secret = HashOutput::zero();
+    let commit_secret = HashOutput(Opaque::zero());
     let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = group_state
         .epoch_secret
         .advance(commit_secret.as_view(), &next.group_context)?;
