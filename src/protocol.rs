@@ -85,6 +85,14 @@ macro_rules! mls_signed {
                 };
                 Ok(group_info)
             }
+
+            pub fn re_sign(&mut self, signature_priv: SignaturePrivateKeyView) -> Result<()> {
+                self.tbs_raw.clear();
+                self.tbs.serialize(&mut self.tbs_raw)?;
+                self.signature =
+                    crypto::sign_with_label(&self.tbs_raw, Self::SIGNATURE_LABEL, signature_priv)?;
+                Ok(())
+            }
         }
 
         impl<'a> $signed_view_type<'a> {
@@ -564,8 +572,9 @@ mls_struct! {
     encrypted_path_secret: EncryptedPathSecretList + EncryptedPathSecretListView,
 }
 
-type UpdatePathNodeList = Vec<UpdatePathNode, { consts::MAX_PROPOSALS_PER_COMMIT }>;
-type UpdatePathNodeListView<'a> = Vec<UpdatePathNodeView<'a>, { consts::MAX_PROPOSALS_PER_COMMIT }>;
+pub type UpdatePathNodeList = Vec<UpdatePathNode, { consts::MAX_PROPOSALS_PER_COMMIT }>;
+pub type UpdatePathNodeListView<'a> =
+    Vec<UpdatePathNodeView<'a>, { consts::MAX_PROPOSALS_PER_COMMIT }>;
 
 mls_struct! {
     UpdatePath + UpdatePathView,
