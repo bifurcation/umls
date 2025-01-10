@@ -159,20 +159,38 @@ impl RatchetTree {
             .step_by(2)
             .position(|n| n.is_none())
             .map(|i| LeafIndex(i as u32));
-        if let Some(index) = blank {
-            self.blank_path(index);
-            *self.node_at_mut(index.into()) = Some(Node::Leaf(leaf_node));
-            return Ok(());
-        }
-
-        let next_leaf = if self.nodes.is_empty() {
-            0
+        let joiner_leaf = if let Some(index) = blank {
+            index
         } else {
-            self.nodes.len() + 1
+            let next_leaf = if self.nodes.is_empty() {
+                LeafIndex(0)
+            } else {
+                LeafIndex((self.nodes.len() as u32 + 1) / 2)
+            };
+
+            self.expand()?;
+            next_leaf
         };
 
-        self.expand()?;
-        self.nodes[next_leaf] = Some(Node::Leaf(leaf_node));
+        self.blank_path(joiner_leaf);
+        *self.node_at_mut(joiner_leaf.into()) = Some(Node::Leaf(leaf_node));
+
+        let mut curr: NodeIndex = joiner_leaf.into();
+        while let Some(parent) = curr.parent(self.size().into()) {
+            curr = parent;
+
+            let maybe_parent_node = self.node_at_mut(parent).as_mut();
+            if maybe_parent_node.is_none() {
+                continue;
+            }
+
+            let Some(Node::Parent(parent_node)) = maybe_parent_node else {
+                return Err(Error("Misconfigured tree"));
+            };
+
+            parent_node.unmerged_leaves.push(joiner_leaf).unwrap();
+        }
+
         Ok(())
     }
 
