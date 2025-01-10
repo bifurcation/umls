@@ -500,8 +500,8 @@ mls_signed! { GroupInfo + GroupInfoView + b"GroupInfoTBS" => GroupInfoTbs + Grou
 
 // Welcome
 
-type OptionalPathSecret = Option<HashOutput>;
-type OptionalPathSecretView<'a> = Option<HashOutputView<'a>>;
+pub type OptionalPathSecret = Option<HashOutput>;
+pub type OptionalPathSecretView<'a> = Option<HashOutputView<'a>>;
 
 // XXX(RLB) These are stubs for now because we don't support PSKs; the `psks` vector must always
 // have length zero.
@@ -572,9 +572,8 @@ mls_struct! {
     encrypted_path_secret: EncryptedPathSecretList + EncryptedPathSecretListView,
 }
 
-pub type UpdatePathNodeList = Vec<UpdatePathNode, { consts::MAX_PROPOSALS_PER_COMMIT }>;
-pub type UpdatePathNodeListView<'a> =
-    Vec<UpdatePathNodeView<'a>, { consts::MAX_PROPOSALS_PER_COMMIT }>;
+pub type UpdatePathNodeList = Vec<UpdatePathNode, { consts::MAX_TREE_DEPTH }>;
+pub type UpdatePathNodeListView<'a> = Vec<UpdatePathNodeView<'a>, { consts::MAX_TREE_DEPTH }>;
 
 mls_struct! {
     UpdatePath + UpdatePathView,

@@ -354,7 +354,18 @@ pub fn generate_hpke(rng: &mut impl CryptoRngCore) -> Result<(HpkePrivateKey, Hp
 }
 
 pub fn derive_hpke(seed: HashOutputView) -> Result<(HpkePrivateKey, HpkePublicKey)> {
-    todo!()
+    let priv_bytes: &[u8; 32] = seed
+        .as_ref()
+        .try_into()
+        .map_err(|_| Error("Invalid key data"))?;
+
+    let raw_priv = StaticSecret::from(*priv_bytes);
+    let raw_pub = PublicKey::from(&raw_priv);
+
+    let hpke_priv = HpkePrivateKey::try_from(raw_priv.as_bytes().as_ref()).unwrap();
+    let hpke_key = HpkePublicKey::try_from(raw_pub.as_bytes().as_ref()).unwrap();
+
+    Ok((hpke_priv, hpke_key))
 }
 
 mod hpke {

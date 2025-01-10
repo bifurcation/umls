@@ -176,9 +176,10 @@ pub fn join_group(
     };
 
     // Verify the signature on the GroupInfo
+    let sender = group_info.signer.to_object();
     {
         // Scoped to bound the lifetime of signer_leaf
-        let Some(signer_leaf) = ratchet_tree.leaf_node_at(group_info.signer.to_object()) else {
+        let Some(signer_leaf) = ratchet_tree.leaf_node_at(sender) else {
             return Err(Error("GroupInfo signer not present in tree"));
         };
 
@@ -194,6 +195,15 @@ pub fn join_group(
     let interim_transcript_hash =
         transcript_hash::interim(&group_context.confirmed_transcript_hash, &confirmation_tag)?;
 
+    // Construct the ratchet tree private state
+    let my_ratchet_tree_priv = RatchetTreePriv::new(
+        &ratchet_tree,
+        my_index,
+        sender,
+        group_secrets.path_secret,
+        key_package_priv.encryption_priv,
+    )?;
+
     // Import the data into a GroupState
     Ok(GroupState {
         ratchet_tree,
@@ -202,6 +212,7 @@ pub fn join_group(
         epoch_secret,
         my_index,
         my_signature_priv: key_package_priv.signature_priv.to_object(),
+        my_ratchet_tree_priv,
     })
 }
 
@@ -221,12 +232,38 @@ pub fn add_member(
     next.ratchet_tree
         .add_leaf(key_package.leaf_node.to_object())?;
 
+    // Update the committer's direct path
+    let (ratchet_tree_priv, update_path) = next.ratchet_tree.update_direct_path(
+        rng,
+        next.my_index,
+        next.my_signature_priv.as_view(),
+    )?;
+
+    next.ratchet_tree.merge(&update_path, next.my_index);
+
+    // Encrypt a new secret to the group, using a provisional group context
+    next.group_context.epoch.0 += 1;
+    next.group_context.tree_hash = next.ratchet_tree.root_hash()?;
+
+    let update_path = next.ratchet_tree.encrypt_path_secrets(
+        rng,
+        next.my_index,
+        &next.group_context,
+        &ratchet_tree_priv,
+        update_path,
+    )?;
+
+    next.my_ratchet_tree_priv = ratchet_tree_priv;
+
     // Form the Commit and the enclosing SignedFramedContent
     let add = Add {
         key_package: key_package.to_object(),
     };
 
-    let mut commit = Commit::default();
+    let mut commit = Commit {
+        path: Some(update_path),
+        proposals: Default::default(),
+    };
     commit
         .proposals
         .push(ProposalOrRef::Proposal(Proposal::Add(add)))
@@ -251,9 +288,7 @@ pub fn add_member(
     let signed_framed_content =
         SignedFramedContent::new(framed_content_tbs, group_state.my_signature_priv)?;
 
-    // Update the GroupContext
-    next.group_context.epoch.0 += 1;
-    next.group_context.tree_hash = next.ratchet_tree.root_hash()?;
+    // Update the confirmed transcript hash
     next.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
         group_state.interim_transcript_hash,
         &signed_framed_content.content,
@@ -261,7 +296,7 @@ pub fn add_member(
     )?;
 
     // Ratchet forward the key schedule
-    let commit_secret = HashOutput(Opaque::zero());
+    let commit_secret = next.my_ratchet_tree_priv.commit_secret()?;
     let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = group_state
         .epoch_secret
         .advance(commit_secret.as_view(), &next.group_context)?;
@@ -391,9 +426,26 @@ pub fn handle_commit(
         Proposal::Remove(remove) => todo!(),
     }
 
-    // Update the GroupContext
+    // Merge the update path into the tree
+    let update_path = commit
+        .path
+        .as_ref()
+        .ok_or(Error("No update path in Commit"))?;
+    next.ratchet_tree.merge(&update_path, sender);
+
+    // Decapsulate the UpdatePath
     next.group_context.epoch.0 += 1;
     next.group_context.tree_hash = next.ratchet_tree.root_hash()?;
+
+    next.ratchet_tree.decap(
+        &mut next.my_ratchet_tree_priv,
+        update_path.as_view(),
+        sender,
+        next.my_index,
+        &next.group_context,
+    )?;
+
+    // Update the confirmed transcript hash
     next.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
         group_state.interim_transcript_hash,
         &signed_framed_content.content,
@@ -401,7 +453,7 @@ pub fn handle_commit(
     )?;
 
     // Ratchet forward the key schedule
-    let commit_secret = HashOutput(Opaque::zero());
+    let commit_secret = next.my_ratchet_tree_priv.commit_secret()?;
     let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = group_state
         .epoch_secret
         .advance(commit_secret.as_view(), &next.group_context)?;
@@ -480,12 +532,8 @@ mod test {
 
             // Insert the joiner at the proper location
             let joiner = match self.states.iter().position(|s| s.is_none()) {
-                Some(index) => {
-                    println!("Found blank: {}", index);
-                    index
-                }
+                Some(index) => index,
                 None => {
-                    println!("Found extending");
                     self.states.push(None).unwrap();
                     self.states.len() - 1
                 }

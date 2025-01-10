@@ -78,7 +78,7 @@ impl NodeIndex {
     pub fn is_above_or_eq(&self, leaf: LeafIndex) -> bool {
         let leaf = NodeIndex::from(leaf);
         let k = self.level();
-        k > 0 && (self.0 >> (k + 1)) == (leaf.0 >> (k + 1))
+        k >= leaf.level() && (self.0 >> (k + 1)) == (leaf.0 >> (k + 1))
     }
 }
 

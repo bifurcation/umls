@@ -4,7 +4,7 @@ use crate::io::*;
 use crate::protocol::*;
 use crate::syntax::*;
 use crate::tree_math::*;
-use crate::{mls_enum, mls_struct, mls_struct_serialize};
+use crate::{make_storage, mls_enum, mls_struct, mls_struct_serialize, serialize};
 
 use heapless::Vec;
 use rand::Rng;
@@ -25,6 +25,48 @@ mls_struct! {
     RatchetTreePriv + RatchetTreePrivView,
     encryption_priv: HpkePrivateKey + HpkePrivateKeyView,
     path_secrets: PathSecretList + PathSecretListView,
+}
+
+impl RatchetTreePriv {
+    pub fn new(
+        ratchet_tree: &RatchetTree,
+        my_index: LeafIndex,
+        sender: LeafIndex,
+        path_secret: OptionalPathSecretView,
+        encryption_priv: HpkePrivateKeyView,
+    ) -> Result<Self> {
+        let mut path_secrets = PathSecretList::default();
+
+        if let Some(path_secret) = path_secret {
+            let mut path_secret = path_secret.to_object();
+            let path = ratchet_tree.resolve_path(sender);
+            path_secrets.resize_default(path.len()).unwrap();
+
+            for (ps_mut, (n, res)) in path_secrets.iter_mut().zip(path.iter()) {
+                if res.is_empty() {
+                    continue;
+                }
+
+                *ps_mut = Some(path_secret.clone());
+                path_secret = crypto::derive_secret(path_secret.as_view().into(), b"path");
+            }
+        }
+
+        Ok(Self {
+            encryption_priv: encryption_priv.to_object(),
+            path_secrets,
+        })
+    }
+
+    pub fn commit_secret(&self) -> Result<HashOutput> {
+        let path_secret = self
+            .path_secrets
+            .last()
+            .ok_or(Error("No root path secret available"))?
+            .as_ref()
+            .ok_or(Error("No root path secret available"))?;
+        Ok(crypto::derive_secret(path_secret.as_view().into(), b"path"))
+    }
 }
 
 type Resolution = Vec<NodeIndex, { consts::MAX_GROUP_SIZE / 2 }>;
@@ -108,6 +150,7 @@ impl RatchetTree {
         })
     }
 
+    // TODO(RLB) Add leaf to unmerged_leaves in any non-blank parent nodes
     pub fn add_leaf(&mut self, leaf_node: LeafNode) -> Result<()> {
         // Assign to a blank leaf node if one exists
         let blank = self
@@ -217,7 +260,7 @@ impl RatchetTree {
         }
     }
 
-    fn encap(
+    pub fn update_direct_path(
         &mut self,
         rng: &mut (impl CryptoRngCore + Rng),
         from: LeafIndex,
@@ -227,7 +270,7 @@ impl RatchetTree {
 
         // Generate path secrets
         let mut path_secret = HashOutput(Opaque::random(rng));
-        let path_secrets: Vec<_, { consts::MAX_TREE_DEPTH }> = path
+        let path_secrets: PathSecretList = path
             .iter()
             .map(|(_n, res)| {
                 if res.is_empty() {
@@ -239,52 +282,22 @@ impl RatchetTree {
             })
             .collect();
 
-        // Encrypt the path secrets
-        let nodes: Result<_> = path_secrets
+        // Compute the corresponding public keys
+        let nodes: Result<UpdatePathNodeList> = path_secrets
             .iter()
-            .zip(path.iter())
-            .filter(|(path_secret, _)| path_secret.is_some())
-            .map(|(path_secret, (n, res))| {
-                let path_secret = path_secret.as_ref().unwrap();
-                let raw_path_secret = Raw::try_from(path_secret.as_ref())?;
-
-                // Generate node key pair
+            .filter_map(|ps| ps.as_ref())
+            .map(|ps| {
                 let node_secret = crypto::derive_secret(path_secret.as_view().into(), b"node");
                 let (_, encryption_key) = crypto::derive_hpke(node_secret.as_view())?;
-
-                // Encrypt the path secret to the resolution
-                let encrypted_path_secret: Result<_> = res
-                    .iter()
-                    .map(|&n| {
-                        let encryption_node = self
-                            .node_at(n)
-                            .as_ref()
-                            .ok_or(Error("Blank node in resolution"))?;
-                        let encryption_key = encryption_node.encryption_key().as_view();
-                        // XXX(RLB) The plaintext here should be the raw data, not serialized as an
-                        // opaque value with a length header.
-                        Ok(EncryptedPathSecret::seal(
-                            rng,
-                            raw_path_secret.clone(),
-                            encryption_key,
-                            &[],
-                        )?)
-                    })
-                    .collect();
-                let encrypted_path_secret = encrypted_path_secret?;
-
                 Ok(UpdatePathNode {
                     encryption_key,
-                    encrypted_path_secret,
+                    encrypted_path_secret: Default::default(),
                 })
             })
             .collect();
-        let nodes: UpdatePathNodeList = nodes?;
+        let nodes = nodes?;
 
-        // Write new nodes to the tree
-        self.merge(nodes.as_view(), &path, from);
-
-        // Re-sign the leaf node in-situ
+        // Re-sign the leaf node
         let Some(Node::Leaf(leaf_node)) = self.node_at_mut(from.into()).as_mut() else {
             return Err(Error("Encap from blank leaf"));
         };
@@ -309,16 +322,63 @@ impl RatchetTree {
         Ok((ratchet_tree_priv, update_path))
     }
 
-    fn decap(
+    pub fn encrypt_path_secrets(
+        &self,
+        rng: &mut (impl CryptoRngCore + Rng),
+        from: LeafIndex,
+        group_context: &GroupContext,
+        ratchet_tree_priv: &RatchetTreePriv,
+        mut update_path: UpdatePath,
+    ) -> Result<UpdatePath> {
+        let path = self.resolve_path(from);
+        let group_context = serialize!(GroupContext, group_context);
+
+        println!("encap ctx = {}", hex::encode(&group_context));
+
+        let filtered_priv = ratchet_tree_priv
+            .path_secrets
+            .iter()
+            .filter_map(|ps| ps.as_ref());
+        let resolutions = path.iter().map(|(_, res)| res);
+        let encrypted_path_secret = update_path
+            .nodes
+            .iter_mut()
+            .map(|n| &mut n.encrypted_path_secret);
+        for ((ps, res), enc) in filtered_priv.zip(resolutions).zip(encrypted_path_secret) {
+            let raw_path_secret = Raw::try_from(ps.as_ref())?;
+            for n in res.iter() {
+                let encryption_node = self
+                    .node_at(*n)
+                    .as_ref()
+                    .ok_or(Error("Blank node in resolution"))?;
+
+                let encryption_key = encryption_node.encryption_key().as_view();
+                let encrypted_path_secret = EncryptedPathSecret::seal(
+                    rng,
+                    raw_path_secret.clone(),
+                    encryption_key,
+                    &group_context,
+                )?;
+
+                enc.push(encrypted_path_secret).unwrap();
+            }
+        }
+
+        Ok(update_path)
+    }
+
+    pub fn decap(
         &mut self,
         ratchet_tree_priv: &mut RatchetTreePriv,
         update_path: UpdatePathView,
         from: LeafIndex,
         to: LeafIndex,
+        group_context: &GroupContext,
     ) -> Result<()> {
-        // XXX(RLB) This might be more memory-intensive than necessary.  Can we compute this on the
-        // fly instead?
         let path = self.resolve_path(from);
+        let group_context = serialize!(GroupContext, group_context);
+
+        println!("decap ctx = {}", hex::encode(&group_context));
 
         // Identify the path secret to decrypt, and where in the path to implant it.
         let path_index = path
@@ -339,25 +399,33 @@ impl RatchetTree {
             .unwrap();
 
         // The key to decrypt with is the first one in our direct path below the overlap node.  The
-        // overlap node is at position `path_index`, so we start there and search backwards.
-        let decrypt_secret = ratchet_tree_priv
+        // overlap node is at position `path_index`, so we start there and search backwards.  If no
+        // path secret is found, we use the leaf private key.
+        let path_encryption_priv = ratchet_tree_priv
             .path_secrets
             .iter()
             .take(path_index)
             .rev()
             .find(|ps| ps.is_some())
-            .map(|ps| ps.as_ref())
-            .flatten()
-            .ok_or(Error("No key available to decrypt"))?;
-        let decrypt_node_secret = crypto::derive_secret(decrypt_secret.as_view().into(), b"node");
-        let (encryption_priv, _) = crypto::derive_hpke(decrypt_node_secret.as_view())?;
+            .map(|ps| {
+                let decrypt_node_secret =
+                    crypto::derive_secret(ps.as_ref().unwrap().as_view().into(), b"node");
+                let (encryption_priv, encryption_pub) =
+                    crypto::derive_hpke(decrypt_node_secret.as_view())?;
+                Ok(encryption_priv)
+            })
+            .transpose()?;
+
+        let encryption_priv_view = if let Some(encryption_priv) = path_encryption_priv.as_ref() {
+            encryption_priv.as_view()
+        } else {
+            ratchet_tree_priv.encryption_priv.as_view()
+        };
 
         // Decrypt the path secret
-        // XXX(RLB) The plaintext here should be the raw data, not serialized as an opaque value
-        // with a length header.
         let encrypted_path_secret =
             update_path.nodes[update_path_index].encrypted_path_secret[res_index].clone();
-        let raw_path_secret = encrypted_path_secret.open(encryption_priv.as_view(), &[])?;
+        let raw_path_secret = encrypted_path_secret.open(encryption_priv_view, &group_context)?;
         let mut path_secret = HashOutput(Opaque::from(raw_path_secret));
 
         // Grow / shrink the path to accommodate changes in the size of the tree
@@ -379,16 +447,11 @@ impl RatchetTree {
             ratchet_tree_priv.path_secrets[i] = Some(path_secret.clone());
         }
 
-        // Merge the public values into the tree
-        *self.node_at_mut(NodeIndex::from(from)) =
-            Some(Node::Leaf(update_path.leaf_node.to_object()));
-
-        self.merge(update_path.nodes, &path, from);
-
         Ok(())
     }
 
-    fn merge(&mut self, nodes: UpdatePathNodeListView, path: &ResolutionPath, from: LeafIndex) {
+    pub fn merge(&mut self, update_path: &UpdatePath, from: LeafIndex) {
+        let path = self.resolve_path(from);
         let curr = NodeIndex::from(from);
         let width = NodeCount::from(self.size());
 
@@ -396,14 +459,16 @@ impl RatchetTree {
             .iter()
             .filter(|(_, res)| !res.is_empty())
             .map(|(n, _)| n);
-        let keys = nodes.iter().map(|n| n.encryption_key);
+        let keys = update_path.nodes.iter().map(|n| n.encryption_key.clone());
         for (n, public_key) in filtered_path.zip(keys) {
             *self.node_at_mut(*n) = Some(Node::Parent(ParentNode {
-                public_key: public_key.to_object(),
+                public_key,
                 parent_hash: Default::default(), // TODO(RLB) Set parent hash
                 unmerged_leaves: Default::default(),
             }));
         }
+
+        *self.node_at_mut(NodeIndex::from(from)) = Some(Node::Leaf(update_path.leaf_node.clone()));
     }
 
     fn resolve_path(&self, leaf_node: LeafIndex) -> ResolutionPath {

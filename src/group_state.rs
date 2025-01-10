@@ -19,6 +19,7 @@ mls_struct! {
     // Local state
     my_index: LeafIndex + LeafIndexView,
     my_signature_priv: SignaturePrivateKey + SignaturePrivateKeyView,
+    my_ratchet_tree_priv: RatchetTreePriv + RatchetTreePrivView,
 }
 
 impl GroupState {
