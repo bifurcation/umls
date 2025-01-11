@@ -28,4 +28,13 @@ To make this possible, we impose a few constraints at run time, for example:
 Nonetheless, this library should interoperate with other MLS libraries in
 scenarios that obey those constraints.
 
+# Measurements
+
+To see how big objects are:
+
+```
+> cargo run --example size
+```
+
+
 [Messaging Layer Security]: https://messaginglayersecurity.rocks/

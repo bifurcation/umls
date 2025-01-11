@@ -14,13 +14,13 @@ mod tree_math;
 mod treekem;
 
 use common::*;
-use crypto::*;
-use group_state::*;
+pub use crypto::*;
+pub use group_state::*;
 use io::*;
 use key_schedule::*;
-use protocol::*;
-use syntax::*;
-use treekem::*;
+pub use protocol::*;
+pub use syntax::*;
+pub use treekem::*;
 
 use heapless::Vec;
 use rand::Rng;
