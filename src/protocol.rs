@@ -831,8 +831,7 @@ impl<'a> PrivateMessageView<'a> {
         );
 
         let sender_data_data = self.encrypted_sender_data.open(key, nonce, &aad)?;
-        let mut sender_data_reader = SliceReader::new(&sender_data_data);
-        let sender_data = SenderDataView::deserialize(&mut sender_data_reader)?;
+        let sender_data = SenderDataView::deserialize(&mut sender_data_data.as_slice())?;
 
         // Look up keys for the sender and generation
         let leaf_index = sender_data.leaf_index.to_object();
@@ -853,8 +852,7 @@ impl<'a> PrivateMessageView<'a> {
         );
 
         let plaintext_data = self.ciphertext.open(key, nonce, &aad)?;
-        let mut plaintext_reader = SliceReader::new(&plaintext_data);
-        let content = PrivateMessageContentView::deserialize(&mut plaintext_reader)?;
+        let content = PrivateMessageContentView::deserialize(&mut plaintext_data.as_slice())?;
 
         // Construct objects to return
         let tbs = FramedContentTbs {
@@ -891,7 +889,6 @@ pub trait SenderKeySource {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::io::SliceReader;
     use crate::make_storage;
 
     macro_rules! test_sign_verify {
@@ -904,7 +901,7 @@ mod test {
             let mut storage = make_storage!($signed_owned_type);
             signed.serialize(&mut storage).unwrap();
 
-            let mut reader = SliceReader::new(&storage);
+            let mut reader = storage.as_slice();
             let view = $signed_view_type::deserialize(&mut reader).unwrap();
 
             view.verify(signature_key.as_view()).unwrap();

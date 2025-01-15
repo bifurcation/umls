@@ -826,7 +826,6 @@ macro_rules! mls_enum {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::io::SliceReader;
 
     use core::fmt::Debug;
     use core::ops::{Deref, DerefMut};
@@ -835,7 +834,7 @@ mod test {
     fn test_serde<'a, T, V, const N: usize>(
         val: &'a T,
         view: &'a V,
-        bytes: &'a [u8],
+        mut bytes: &'a [u8],
         mut storage: Vec<u8, N>,
     ) where
         T: Serialize + AsView<View<'a> = V> + PartialEq + Debug + 'a,
@@ -846,8 +845,7 @@ mod test {
         assert_eq!(&storage, bytes);
 
         // Deserialization
-        let mut reader = SliceReader::new(bytes);
-        let deserialized = V::deserialize(&mut reader).unwrap();
+        let deserialized = V::deserialize(&mut bytes).unwrap();
         assert_eq!(&deserialized, view);
 
         // AsView + ToObject

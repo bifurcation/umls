@@ -16,7 +16,6 @@ pub mod treekem;
 use common::*;
 use crypto::*;
 use group_state::*;
-use io::*;
 use key_schedule::*;
 use protocol::*;
 use syntax::*;
@@ -139,8 +138,7 @@ pub fn join_group(
     let group_secrets_data = welcome.secrets[0]
         .encrypted_group_secrets
         .open(key_package_priv.init_priv, &[])?;
-    let mut group_secrets_reader = SliceReader::new(&group_secrets_data);
-    let group_secrets = GroupSecretsView::deserialize(&mut group_secrets_reader)?;
+    let group_secrets = GroupSecretsView::deserialize(&mut group_secrets_data.as_slice())?;
 
     if !group_secrets.psks.is_empty() {
         return Err(Error("Not implemented"));
@@ -153,8 +151,7 @@ pub fn join_group(
     let group_info_data = welcome
         .encrypted_group_info
         .open(welcome_key, welcome_nonce, &[])?;
-    let mut group_info_reader = SliceReader::new(&group_info_data);
-    let group_info = GroupInfoView::deserialize(&mut group_info_reader)?;
+    let group_info = GroupInfoView::deserialize(&mut group_info_data.as_slice())?;
 
     // Extract the ratchet tree from an extension
     let ratchet_tree_extension = group_info.extensions.iter().find(|ext| {
@@ -166,8 +163,7 @@ pub fn join_group(
     };
 
     let ratchet_tree_data = ratchet_tree_extension.extension_data;
-    let mut ratchet_tree_reader = SliceReader::new(ratchet_tree_data.as_ref());
-    let ratchet_tree = RatchetTreeView::deserialize(&mut ratchet_tree_reader)?;
+    let ratchet_tree = RatchetTreeView::deserialize(&mut ratchet_tree_data.as_ref())?;
     let ratchet_tree = ratchet_tree.to_object();
 
     let tree_hash = ratchet_tree.root_hash()?;

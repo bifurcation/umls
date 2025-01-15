@@ -13,15 +13,8 @@ pub trait ReadRef<'a>: Sized {
     /// are available.
     fn read_ref(&mut self, n: usize) -> Result<&'a [u8]>;
 
-    /// How many bytes have been read from this reader
-    fn position(&self) -> usize;
-
     /// Are there more bytes to be read?
     fn is_empty(&self) -> bool;
-
-    /// Create a new reader on the same data stream, starting at the current position but
-    /// reading and advancing independently.
-    fn fork(&self) -> Self;
 
     /// Create a new reader for the next `n` bytes, and advance this reader past those `n` bytes.
     fn take(&mut self, n: usize) -> Result<Self>;
@@ -60,54 +53,30 @@ impl Write for CountWriter {
     }
 }
 
-#[derive(Clone)]
-pub struct SliceReader<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> SliceReader<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
-    }
-}
-
-impl<'a> ReadRef<'a> for SliceReader<'a> {
-    #[inline]
+impl<'a> ReadRef<'a> for &'a [u8] {
     fn read_ref(&mut self, n: usize) -> Result<&'a [u8]> {
-        if self.pos + n > self.data.len() {
+        if self.len() < n {
             return Err(Error("Insufficient data"));
         }
 
-        let start = self.pos;
-        self.pos += n;
-        Ok(&self.data[start..self.pos])
-    }
-
-    fn position(&self) -> usize {
-        self.pos
+        let (data, rest) = self.split_at(n);
+        *self = rest;
+        Ok(data)
     }
 
     fn is_empty(&self) -> bool {
-        self.pos >= self.data.len()
-    }
-
-    fn fork(&self) -> Self {
-        Self {
-            data: &self.data[self.pos..],
-            pos: 0,
-        }
+        <[u8]>::is_empty(self)
     }
 
     fn take(&mut self, n: usize) -> Result<Self> {
-        self.read_ref(n).map(Self::new)
+        self.read_ref(n)
     }
 
     fn peek(&self) -> Result<u8> {
-        if self.pos >= self.data.len() {
+        if self.is_empty() {
             Err(Error("Insufficient data"))
         } else {
-            Ok(self.data[self.pos])
+            Ok(self[0])
         }
     }
 }
@@ -146,21 +115,11 @@ mod test {
     fn read() {
         // Successful raed
         const DATA: &[u8] = &[0, 2, 4, 6, 8, 10, 12, 14];
-        let mut reader = SliceReader::new(DATA);
-        assert_eq!(reader.position(), 0);
+        let mut reader = DATA;
         assert_eq!(reader.peek().unwrap(), 0);
 
         let view = reader.read_ref(3).unwrap();
         assert_eq!(view, &DATA[0..3]);
-        assert_eq!(reader.position(), 3);
-        assert_eq!(reader.peek().unwrap(), 6);
-
-        let mut sub = reader.fork();
-        let view = sub.read_ref(4).unwrap();
-        assert_eq!(view, &DATA[3..7]);
-        assert_eq!(sub.position(), 4);
-        assert_eq!(sub.peek().unwrap(), 14);
-        assert_eq!(reader.position(), 3);
         assert_eq!(reader.peek().unwrap(), 6);
 
         // Failed read
@@ -168,7 +127,6 @@ mod test {
 
         let view = reader.read_ref(5).unwrap();
         assert_eq!(view, &DATA[3..]);
-        assert_eq!(reader.position(), 8);
         assert!(reader.peek().is_err());
     }
 }
