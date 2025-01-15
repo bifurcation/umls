@@ -52,14 +52,12 @@ macro_rules! mls_signed {
         #[derive(Clone, Default, Debug, PartialEq)]
         pub struct $signed_owned_type {
             pub tbs: $val_owned_type,
-            tbs_raw: Vec<u8, { <$val_owned_type>::MAX_SIZE }>,
             pub signature: Signature,
         }
 
         #[derive(Clone, Debug, PartialEq)]
         pub struct $signed_view_type<'a> {
             pub tbs: $val_view_type<'a>,
-            tbs_raw: &'a [u8],
             pub signature: SignatureView<'a>,
         }
 
@@ -71,34 +69,29 @@ macro_rules! mls_signed {
                 signature_priv: SignaturePrivateKeyView,
             ) -> Result<$signed_owned_type> {
                 // Serialize the part to be signed
-                let mut tbs_raw = Vec::new();
-                tbs.serialize(&mut tbs_raw)?;
+                let tbs_raw = serialize!($val_owned_type, tbs);
 
                 // Populate the signature
                 let signature =
                     crypto::sign_with_label(&tbs_raw, Self::SIGNATURE_LABEL, signature_priv)?;
 
-                let group_info = $signed_owned_type {
-                    tbs,
-                    tbs_raw,
-                    signature,
-                };
+                let group_info = $signed_owned_type { tbs, signature };
                 Ok(group_info)
             }
 
             pub fn re_sign(&mut self, signature_priv: SignaturePrivateKeyView) -> Result<()> {
-                self.tbs_raw.clear();
-                self.tbs.serialize(&mut self.tbs_raw)?;
+                let tbs_raw = serialize!($val_owned_type, self.tbs);
                 self.signature =
-                    crypto::sign_with_label(&self.tbs_raw, Self::SIGNATURE_LABEL, signature_priv)?;
+                    crypto::sign_with_label(&tbs_raw, Self::SIGNATURE_LABEL, signature_priv)?;
                 Ok(())
             }
         }
 
         impl<'a> $signed_view_type<'a> {
             pub fn verify(&self, signature_key: SignaturePublicKeyView) -> Result<()> {
+                let tbs_raw = serialize!($val_owned_type, self.tbs.to_object());
                 crypto::verify_with_label(
-                    self.tbs_raw.as_ref(),
+                    tbs_raw.as_ref(),
                     $signed_owned_type::SIGNATURE_LABEL,
                     signature_key,
                     self.signature.clone(),
@@ -140,17 +133,10 @@ macro_rules! mls_signed {
 
         impl<'a> Deserialize<'a> for $signed_view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-                let mut sub_reader = reader.fork();
-
-                let tbs = $val_view_type::deserialize(&mut sub_reader)?;
-                let tbs_raw = reader.read_ref(sub_reader.position())?;
+                let tbs = $val_view_type::deserialize(reader)?;
                 let signature = SignatureView::deserialize(reader)?;
 
-                Ok(Self {
-                    tbs,
-                    tbs_raw,
-                    signature,
-                })
+                Ok(Self { tbs, signature })
             }
         }
 
@@ -160,7 +146,6 @@ macro_rules! mls_signed {
             fn as_view<'a>(&'a self) -> Self::View<'a> {
                 Self::View {
                     tbs: self.tbs.as_view(),
-                    tbs_raw: &self.tbs_raw,
                     signature: self.signature.as_view(),
                 }
             }
@@ -172,7 +157,6 @@ macro_rules! mls_signed {
             fn to_object(&self) -> Self::Object {
                 Self::Object {
                     tbs: self.tbs.to_object(),
-                    tbs_raw: self.tbs_raw.try_into().unwrap(),
                     signature: self.signature.to_object(),
                 }
             }
@@ -885,11 +869,9 @@ impl<'a> PrivateMessageView<'a> {
             },
             binder: FramedContentBinder::Member(group_context.clone()),
         };
-        let tbs_raw = serialize!(FramedContentTbs, tbs);
 
         let signed_framed_content = SignedFramedContent {
             tbs,
-            tbs_raw,
             signature: content.signature.to_object(),
         };
         let confirmation_tag = content.confirmation_tag.to_object();
