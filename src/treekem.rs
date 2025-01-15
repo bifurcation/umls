@@ -6,7 +6,7 @@ use crate::syntax::*;
 use crate::tree_math::*;
 use crate::{make_storage, mls_enum, mls_struct, mls_struct_serialize, serialize};
 
-use heapless::Vec;
+use heapless::{FnvIndexMap, Vec};
 use rand::Rng;
 use rand_core::CryptoRngCore;
 
@@ -169,6 +169,9 @@ type OptionalNodeView<'a> = Option<NodeView<'a>>;
 // * Write custom Serialize and Deserialize implementations that alternate as appropriate
 type NodeList = Vec<OptionalNode, { 2 * consts::MAX_GROUP_SIZE - 1 }>;
 type NodeListView<'a> = Vec<OptionalNodeView<'a>, { 2 * consts::MAX_GROUP_SIZE - 1 }>;
+
+// TODO(RLB): Verify that this is the correct max size.
+type TreeHashCache = FnvIndexMap<(NodeIndex, usize), HashOutput, { consts::MAX_GROUP_SIZE }>;
 
 mls_struct! {
     RatchetTree + RatchetTreeView,
@@ -614,6 +617,133 @@ impl RatchetTree {
         }
 
         self.parent_hash_now(from.into(), last_parent, from)
+    }
+
+    fn original_tree_hash(
+        &self,
+        cache: &mut TreeHashCache,
+        index: NodeIndex,
+        parent_except: &[LeafIndex],
+    ) -> Result<HashOutput> {
+        // Scope the unmerged leaves list down to this subtree
+        let local_except: UnmergedLeavesList = parent_except
+            .iter()
+            .filter(|&&n| index.is_above_or_eq(n))
+            .copied()
+            .collect();
+
+        if local_except.is_empty() {
+            return self.hash(index);
+        }
+
+        // If this method has been called before with the same number of excluded
+        // leaves (which implies the same set), then use the cached value.
+        if let Some(hash) = cache.get(&(index, local_except.len())) {
+            return Ok(hash.clone());
+        }
+
+        // If there is no entry in either cache, recompute the value
+        let hash = if let Ok(leaf_index) = LeafIndex::try_from(index) {
+            // A leaf node with local changes is by definition excluded from the parent
+            // hash.  So we return the hash of an empty leaf.
+            let none: Option<Nil> = None;
+
+            let mut h = Hash::new();
+            leaf_index.serialize(&mut h)?;
+            none.serialize(&mut h)?;
+            h.finalize()
+        } else {
+            // If there is no cached value, recalculate the child hashes with the
+            // specified `except` list, removing the `except` list from
+            // `unmerged_leaves`.
+            let left_hash = self.original_tree_hash(cache, index.left().unwrap(), &local_except)?;
+            let right_hash =
+                self.original_tree_hash(cache, index.right().unwrap(), &local_except)?;
+
+            let parent_node = self.node_at(index).as_ref().map(|n| match n {
+                Node::Parent(parent) => {
+                    let mut parent = parent.clone();
+                    parent.unmerged_leaves.retain(|i| !local_except.contains(i));
+                    parent
+                }
+                _ => unreachable!(),
+            });
+
+            let mut h = Hash::new();
+            parent_node.serialize(&mut h)?;
+            left_hash.serialize(&mut h)?;
+            right_hash.serialize(&mut h)?;
+            h.finalize()
+        };
+
+        cache
+            .insert((index, local_except.len()), hash.clone())
+            .unwrap();
+        Ok(hash)
+    }
+
+    fn original_parent_hash(
+        &self,
+        cache: &mut TreeHashCache,
+        parent: NodeIndex,
+        sibling: NodeIndex,
+    ) -> Result<HashOutput> {
+        let Some(Node::Parent(parent_node)) = self.node_at(parent) else {
+            unreachable!();
+        };
+
+        let sibling_hash = self.original_tree_hash(cache, sibling, &parent_node.unmerged_leaves)?;
+
+        let mut h = Hash::new();
+        parent_node.public_key.serialize(&mut h)?;
+        parent_node.parent_hash.serialize(&mut h)?;
+        sibling_hash.serialize(&mut h)?;
+        Ok(h.finalize())
+    }
+
+    fn has_parent_hash(&self, node: NodeIndex, target_hash: HashOutput) -> bool {
+        self.resolve(node)
+            .iter()
+            .filter_map(|n| {
+                self.node_at(*n).as_ref().and_then(|node| match node {
+                    Node::Parent(parent) => Some(&parent.parent_hash),
+                    Node::Leaf(leaf) => match &leaf.leaf_node_source {
+                        LeafNodeSource::Commit(parent_hash) => Some(parent_hash),
+                        _ => None,
+                    },
+                })
+            })
+            .any(|parent_hash| *parent_hash == target_hash)
+    }
+
+    pub fn parent_hash_valid(&self) -> Result<bool> {
+        let mut cache = TreeHashCache::new();
+
+        let width: NodeCount = self.size().into();
+        let height = width.root().level();
+        for level in 1..height {
+            let stride = 2 << (level as usize);
+            let start = (stride >> 1) - 1;
+
+            for p in (start..width.0).step_by(stride) {
+                let p = NodeIndex(p);
+                if self.node_at(p).is_none() {
+                    continue;
+                }
+
+                let l = p.left().unwrap();
+                let r = p.right().unwrap();
+
+                let lh = self.original_parent_hash(&mut cache, p, r)?;
+                let rh = self.original_parent_hash(&mut cache, p, l)?;
+
+                if !self.has_parent_hash(l, lh) && !self.has_parent_hash(r, rh) {
+                    return Ok(false);
+                }
+            }
+        }
+
+        Ok(true)
     }
 
     fn resolve_path(&self, leaf_node: LeafIndex) -> ResolutionPath {

@@ -171,7 +171,8 @@ pub fn join_group(
     let ratchet_tree = ratchet_tree.to_object();
 
     let tree_hash = ratchet_tree.root_hash()?;
-    if tree_hash.as_view() != group_info.group_context.tree_hash {
+    let parent_hash_valid = ratchet_tree.parent_hash_valid()?;
+    if tree_hash.as_view() != group_info.group_context.tree_hash || !parent_hash_valid {
         return Err(Error("Invalid ratchet tree"));
     }
 

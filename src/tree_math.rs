@@ -1,7 +1,7 @@
 use crate::common::*;
 use crate::protocol::LeafIndex;
 
-#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Eq, Hash)]
 pub struct NodeIndex(pub usize);
 
 impl From<LeafIndex> for NodeIndex {
@@ -23,7 +23,7 @@ impl TryFrom<NodeIndex> for LeafIndex {
 }
 
 impl NodeIndex {
-    fn level(&self) -> usize {
+    pub fn level(&self) -> usize {
         self.0.trailing_ones() as usize
     }
 
