@@ -380,6 +380,9 @@ impl RatchetTree {
             .collect();
         let nodes = nodes?;
 
+        // Assemble and merge the update path
+        let parent_hash = self.merge(&nodes, from)?;
+
         // Re-sign the leaf node
         let Some(Node::Leaf(leaf_node)) = self.node_at_mut(from.into()).as_mut() else {
             return Err(Error("Encap from blank leaf"));
@@ -387,8 +390,7 @@ impl RatchetTree {
 
         let (encryption_priv, encryption_key) = crypto::generate_hpke(rng)?;
         leaf_node.tbs.encryption_key = encryption_key;
-        // TODO(RLB): Add parent hash here
-        leaf_node.tbs.leaf_node_source = LeafNodeSource::Commit(Default::default());
+        leaf_node.tbs.leaf_node_source = LeafNodeSource::Commit(parent_hash);
         leaf_node.re_sign(signature_priv)?;
 
         // Assemble the return values
@@ -404,6 +406,10 @@ impl RatchetTree {
         };
 
         Ok((ratchet_tree_priv, update_path))
+    }
+
+    pub fn merge_leaf(&mut self, from: LeafIndex, leaf_node: LeafNode) {
+        self.node_at_mut(from.into()).replace(Node::Leaf(leaf_node));
     }
 
     pub fn encrypt_path_secrets(
@@ -554,7 +560,37 @@ impl RatchetTree {
         Ok(())
     }
 
-    pub fn merge(&mut self, update_path: &UpdatePath, from: LeafIndex) {
+    fn parent_hash_now(
+        &mut self,
+        n: NodeIndex,
+        last_parent: Option<NodeIndex>,
+        from: LeafIndex,
+    ) -> Result<HashOutput> {
+        let Some(p) = last_parent else {
+            // Parent hash of the root is an empty byte string
+            return Ok(HashOutput::default());
+        };
+
+        let Some(Node::Parent(parent)) = self.node_at(p) else {
+            unreachable!();
+        };
+
+        let copath_child = p.copath_child(from).unwrap();
+        let original_sibling_tree_hash = self.hash(copath_child)?;
+
+        // struct {
+        //     HPKEPublicKey encryption_key;
+        //     opaque parent_hash<V>;
+        //     opaque original_sibling_tree_hash<V>;
+        // } ParentHashInput;
+        let mut h = Hash::new();
+        parent.public_key.serialize(&mut h)?;
+        parent.parent_hash.serialize(&mut h)?;
+        original_sibling_tree_hash.serialize(&mut h)?;
+        Ok(h.finalize())
+    }
+
+    pub fn merge(&mut self, nodes: &UpdatePathNodeList, from: LeafIndex) -> Result<HashOutput> {
         let path = self.resolve_path(from);
         let curr = NodeIndex::from(from);
         let width = NodeCount::from(self.size());
@@ -562,17 +598,22 @@ impl RatchetTree {
         let filtered_path = path
             .iter()
             .filter(|(_, res)| !res.is_empty())
-            .map(|(n, _)| n);
-        let keys = update_path.nodes.iter().map(|n| n.encryption_key.clone());
-        for (n, public_key) in filtered_path.zip(keys) {
+            .map(|(n, _)| *n);
+        let keys = nodes.iter().map(|n| n.encryption_key.clone());
+        let index_key_pairs: Vec<_, { consts::MAX_TREE_DEPTH }> = filtered_path.zip(keys).collect();
+        let mut last_parent: Option<NodeIndex> = None;
+        for (n, public_key) in index_key_pairs.iter().rev() {
+            let parent_hash = self.parent_hash_now(*n, last_parent, from)?;
+            last_parent.replace(*n);
+
             *self.node_at_mut(*n) = Some(Node::Parent(ParentNode {
-                public_key,
-                parent_hash: Default::default(), // TODO(RLB) Set parent hash
+                public_key: public_key.clone(),
+                parent_hash: parent_hash,
                 unmerged_leaves: Default::default(),
             }));
         }
 
-        *self.node_at_mut(NodeIndex::from(from)) = Some(Node::Leaf(update_path.leaf_node.clone()));
+        self.parent_hash_now(from.into(), last_parent, from)
     }
 
     fn resolve_path(&self, leaf_node: LeafIndex) -> ResolutionPath {

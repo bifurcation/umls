@@ -3,24 +3,24 @@
 #![allow(unused_variables)]
 
 mod common;
-mod crypto;
-mod group_state;
+pub mod crypto;
+pub mod group_state;
 mod io;
 mod key_schedule;
-mod protocol;
-mod syntax;
+pub mod protocol;
+pub mod syntax;
 mod transcript_hash;
 mod tree_math;
-mod treekem;
+pub mod treekem;
 
 use common::*;
-pub use crypto::*;
-pub use group_state::*;
+use crypto::*;
+use group_state::*;
 use io::*;
 use key_schedule::*;
-pub use protocol::*;
-pub use syntax::*;
-pub use treekem::*;
+use protocol::*;
+use syntax::*;
+use treekem::*;
 
 use heapless::Vec;
 use rand::Rng;
@@ -268,8 +268,6 @@ pub fn send_commit(
         next.my_signature_priv.as_view(),
     )?;
 
-    next.ratchet_tree.merge(&update_path, next.my_index);
-
     // Encrypt a new secret to the group, using a provisional group context
     next.group_context.epoch.0 += 1;
     next.group_context.tree_hash = next.ratchet_tree.root_hash()?;
@@ -483,7 +481,13 @@ pub fn handle_commit(
         .path
         .as_ref()
         .ok_or(Error("No update path in Commit"))?;
-    next.ratchet_tree.merge(&update_path, sender);
+    let parent_hash = next.ratchet_tree.merge(&update_path.nodes, sender)?;
+
+    if update_path.leaf_node.leaf_node_source != LeafNodeSource::Commit(parent_hash) {
+        return Err(Error("Invalid parent hash"));
+    }
+    next.ratchet_tree
+        .merge_leaf(sender, update_path.leaf_node.clone());
 
     // Decapsulate the UpdatePath
     next.group_context.epoch.0 += 1;

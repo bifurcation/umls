@@ -1,4 +1,4 @@
-use umls::*;
+use umls::{crypto::*, group_state::*, protocol::*, syntax::*};
 
 use tabled::{settings::style::Style, Table, Tabled};
 
@@ -9,7 +9,7 @@ struct TypeInfo {
     serialized_size: usize,
 }
 
-fn type_info<T: umls::Serialize>() -> TypeInfo {
+fn type_info<T: Serialize>() -> TypeInfo {
     TypeInfo {
         name: std::any::type_name::<T>(),
         in_memory_size: std::mem::size_of::<T>(),
