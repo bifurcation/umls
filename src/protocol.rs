@@ -2,10 +2,11 @@ use crate::common::*;
 use crate::crypto::{self, *};
 use crate::io::*;
 use crate::key_schedule::*;
+use crate::stack::*;
 use crate::syntax::*;
 use crate::{
     make_storage, mls_enum, mls_newtype_opaque, mls_newtype_primitive, mls_struct,
-    mls_struct_serialize, serialize,
+    mls_struct_serialize, serialize, stack_ptr, tick,
 };
 
 use core::marker::PhantomData;

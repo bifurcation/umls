@@ -2,9 +2,10 @@ use crate::common::*;
 use crate::crypto::{self, *};
 use crate::io::*;
 use crate::protocol::*;
+use crate::stack::*;
 use crate::syntax::*;
 use crate::tree_math::*;
-use crate::{make_storage, mls_enum, mls_struct, mls_struct_serialize, serialize};
+use crate::{make_storage, mls_enum, mls_struct, mls_struct_serialize, serialize, stack_ptr, tick};
 
 use heapless::{FnvIndexMap, Vec};
 use itertools::Itertools;
@@ -37,6 +38,7 @@ impl RatchetTreePriv {
         path_secret: OptionalPathSecretView,
         encryption_priv: HpkePrivateKeyView,
     ) -> Result<Self> {
+        tick!();
         let mut path_secrets = PathSecretList::default();
 
         if let Some(path_secret) = path_secret {
@@ -62,6 +64,7 @@ impl RatchetTreePriv {
     }
 
     pub fn blank_path(&mut self, my_index: LeafIndex, removed: LeafIndex, width: NodeCount) {
+        tick!();
         let mut curr: Option<NodeIndex> = Some(my_index.into());
         curr = curr.unwrap().parent(width);
 
@@ -82,10 +85,12 @@ impl RatchetTreePriv {
     }
 
     pub fn commit_secret(&self) -> HashOutput {
+        tick!();
         self.commit_secret.clone()
     }
 
     pub fn consistent(&self, ratchet_tree: &RatchetTree, my_index: LeafIndex) -> bool {
+        tick!();
         let width: NodeCount = ratchet_tree.size().into();
         let encryption_key = crypto::hpke_priv_to_pub(&self.encryption_priv);
         if ratchet_tree
@@ -152,6 +157,7 @@ mls_enum! {
 
 impl Node {
     fn encryption_key(&self) -> &HpkePublicKey {
+        tick!();
         match self {
             Node::Leaf(leaf) => &leaf.encryption_key,
             Node::Parent(parent) => &parent.public_key,
@@ -165,6 +171,7 @@ impl TryFrom<NodeIndex> for ParentIndex {
     type Error = Error;
 
     fn try_from(val: NodeIndex) -> Result<Self> {
+        tick!();
         if val.is_leaf() {
             return Err(Error("Malformed index"));
         }
@@ -190,6 +197,7 @@ pub struct RatchetTreeView<'a> {
 
 impl<'a> RatchetTreeView<'a> {
     pub fn size(&self) -> LeafCount {
+        tick!();
         LeafCount(self.leaf_nodes.len())
     }
 }
@@ -200,6 +208,7 @@ impl Serialize for RatchetTree {
 
     // Serialize Vec<Option<Node>> without materializing it
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
         let mut counter = CountWriter::default();
         for node in self.node_iter() {
             node.serialize(&mut counter)?;
@@ -217,6 +226,7 @@ impl Serialize for RatchetTree {
 
 impl<'a> Deserialize<'a> for RatchetTreeView<'a> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        tick!();
         let len = Varint::deserialize(reader)?;
 
         let mut content = reader.take(len.0)?;
@@ -257,6 +267,7 @@ impl AsView for RatchetTree {
     type View<'a> = RatchetTreeView<'a>;
 
     fn as_view<'a>(&'a self) -> Self::View<'a> {
+        tick!();
         Self::View {
             leaf_nodes: self.leaf_nodes.as_view(),
             parent_nodes: self.parent_nodes.as_view(),
@@ -268,6 +279,7 @@ impl<'a> ToObject for RatchetTreeView<'a> {
     type Object = RatchetTree;
 
     fn to_object(&self) -> Self::Object {
+        tick!();
         Self::Object {
             leaf_nodes: self.leaf_nodes.to_object(),
             parent_nodes: self.parent_nodes.to_object(),
@@ -283,6 +295,7 @@ impl RatchetTree {
         Varint::size(Self::MAX_LEAF_NODES_SIZE + Self::MAX_PARENT_NODES_SIZE);
 
     fn node_iter<'a>(&'a self) -> impl Iterator<Item = Option<Node>> + use<'a> {
+        tick!();
         let n_trailing_blanks = self
             .leaf_nodes
             .iter()
@@ -305,22 +318,27 @@ impl RatchetTree {
     }
 
     pub fn leaf_node_at(&self, i: LeafIndex) -> &Option<LeafNode> {
+        tick!();
         &self.leaf_nodes[i.0 as usize]
     }
 
     fn parent_node_at(&self, i: ParentIndex) -> &Option<ParentNode> {
+        tick!();
         &self.parent_nodes[i.0]
     }
 
     fn leaf_node_at_mut(&mut self, i: LeafIndex) -> &mut Option<LeafNode> {
+        tick!();
         &mut self.leaf_nodes[i.0 as usize]
     }
 
     fn parent_node_at_mut(&mut self, i: ParentIndex) -> &mut Option<ParentNode> {
+        tick!();
         &mut self.parent_nodes[i.0]
     }
 
     fn encryption_key_at<'a>(&'a self, n: NodeIndex) -> Option<&'a HpkePublicKey> {
+        tick!();
         // TODO(RLB) Find a way to do this with match, maybe by making NodeIndex an enum?
         if let Ok(n) = LeafIndex::try_from(n) {
             self.leaf_node_at(n)
@@ -333,6 +351,7 @@ impl RatchetTree {
     }
 
     fn parent_hash_at(&self, n: NodeIndex) -> Option<HashOutput> {
+        tick!();
         // TODO(RLB) Find a way to do this with match, maybe by making NodeIndex an enum?
         if let Ok(n) = LeafIndex::try_from(n) {
             self.leaf_node_at(n)
@@ -350,10 +369,12 @@ impl RatchetTree {
     }
 
     pub fn size(&self) -> LeafCount {
+        tick!();
         LeafCount(self.leaf_nodes.len())
     }
 
     pub fn find(&self, target: LeafNodeView) -> Option<LeafIndex> {
+        tick!();
         let target = Some(target.clone());
         self.leaf_nodes
             .iter()
@@ -362,6 +383,7 @@ impl RatchetTree {
     }
 
     pub fn add_leaf(&mut self, leaf_node: LeafNode) -> Result<LeafIndex> {
+        tick!();
         // Assign to a blank leaf node if one exists
         let blank = self
             .leaf_nodes
@@ -403,6 +425,7 @@ impl RatchetTree {
     }
 
     pub fn remove_leaf(&mut self, removed: LeafIndex) -> Result<()> {
+        tick!();
         if self.leaf_node_at(removed.into()).is_none() {
             return Err(Error("Member not in group"));
         }
@@ -413,10 +436,12 @@ impl RatchetTree {
     }
 
     pub fn root_hash(&self) -> Result<HashOutput> {
+        tick!();
         self.hash(self.size().root())
     }
 
     fn hash(&self, index: NodeIndex) -> Result<HashOutput> {
+        tick!();
         if index.is_leaf() {
             self.leaf_hash(index)
         } else {
@@ -425,6 +450,7 @@ impl RatchetTree {
     }
 
     fn leaf_hash(&self, index: NodeIndex) -> Result<HashOutput> {
+        tick!();
         // struct {
         //     uint32 leaf_index;
         //     optional<LeafNode> leaf_node;
@@ -441,6 +467,7 @@ impl RatchetTree {
     }
 
     fn parent_hash(&self, index: NodeIndex) -> Result<HashOutput> {
+        tick!();
         // struct {
         //     optional<ParentNode> parent_node;
         //     opaque left_hash<V>;
@@ -458,6 +485,7 @@ impl RatchetTree {
     }
 
     fn expand(&mut self) -> Result<()> {
+        tick!();
         let leaf_width = if self.leaf_nodes.is_empty() {
             1
         } else {
@@ -473,6 +501,7 @@ impl RatchetTree {
     }
 
     fn truncate(&mut self) {
+        tick!();
         let mut start = self.leaf_nodes.len() / 2;
         let mut end = self.leaf_nodes.len();
         while start > 0 && self.leaf_nodes[start..end].iter().all(|n| n.is_none()) {
@@ -487,6 +516,7 @@ impl RatchetTree {
     }
 
     fn blank_path(&mut self, leaf_index: LeafIndex) {
+        tick!();
         let node_index: NodeIndex = leaf_index.into();
 
         *self.leaf_node_at_mut(leaf_index) = None;
@@ -504,6 +534,7 @@ impl RatchetTree {
         from: LeafIndex,
         signature_priv: SignaturePrivateKeyView,
     ) -> Result<(RatchetTreePriv, UpdatePath)> {
+        tick!();
         let path = self.resolve_path(from);
 
         // Generate path secrets
@@ -566,6 +597,7 @@ impl RatchetTree {
     }
 
     pub fn merge_leaf(&mut self, from: LeafIndex, leaf_node: LeafNode) {
+        tick!();
         self.leaf_node_at_mut(from).replace(leaf_node);
     }
 
@@ -577,6 +609,7 @@ impl RatchetTree {
         ratchet_tree_priv: &RatchetTreePriv,
         mut update_path: UpdatePath,
     ) -> Result<UpdatePath> {
+        tick!();
         let path = self.resolve_path(from);
         let group_context = serialize!(GroupContext, group_context);
 
@@ -616,6 +649,7 @@ impl RatchetTree {
         from: LeafIndex,
         to: LeafIndex,
     ) -> Result<HashOutput> {
+        tick!();
         let path = self.resolve_path(from);
         let parent_index = path.iter().position(|(n, _)| n.is_above_or_eq(to)).unwrap();
         ratchet_tree_priv.path_secrets[parent_index]
@@ -631,6 +665,7 @@ impl RatchetTree {
         to: LeafIndex,
         group_context: &GroupContext,
     ) -> Result<()> {
+        tick!();
         let path = self.resolve_path(from);
         let group_context = serialize!(GroupContext, group_context);
 
@@ -718,6 +753,7 @@ impl RatchetTree {
         last_parent: Option<NodeIndex>,
         from: LeafIndex,
     ) -> Result<HashOutput> {
+        tick!();
         let Some(p) = last_parent else {
             // Parent hash of the root is an empty byte string
             return Ok(HashOutput::default());
@@ -743,6 +779,7 @@ impl RatchetTree {
     }
 
     pub fn merge(&mut self, nodes: &UpdatePathNodeList, from: LeafIndex) -> Result<HashOutput> {
+        tick!();
         let path = self.resolve_path(from);
         let curr = NodeIndex::from(from);
         let width = NodeCount::from(self.size());
@@ -774,6 +811,7 @@ impl RatchetTree {
         index: NodeIndex,
         parent_except: &[LeafIndex],
     ) -> Result<HashOutput> {
+        tick!();
         // Scope the unmerged leaves list down to this subtree
         let local_except: UnmergedLeavesList = parent_except
             .iter()
@@ -837,6 +875,7 @@ impl RatchetTree {
         parent: NodeIndex,
         sibling: NodeIndex,
     ) -> Result<HashOutput> {
+        tick!();
         let parent_index = ParentIndex::try_from(parent).unwrap();
         let Some(parent_node) = self.parent_node_at(parent_index) else {
             unreachable!();
@@ -852,6 +891,7 @@ impl RatchetTree {
     }
 
     fn has_parent_hash(&self, node: NodeIndex, target_hash: HashOutput) -> bool {
+        tick!();
         self.resolve(node)
             .iter()
             .filter_map(|&n| self.parent_hash_at(n))
@@ -859,6 +899,7 @@ impl RatchetTree {
     }
 
     pub fn parent_hash_valid(&self) -> Result<bool> {
+        tick!();
         let mut cache = TreeHashCache::new();
 
         let width: NodeCount = self.size().into();
@@ -892,6 +933,7 @@ impl RatchetTree {
     }
 
     fn resolve_path(&self, leaf_node: LeafIndex) -> ResolutionPath {
+        tick!();
         let mut path = Vec::new();
         let mut curr = NodeIndex::from(leaf_node);
         let width = self.size().into();
@@ -906,6 +948,7 @@ impl RatchetTree {
     }
 
     fn resolve(&self, subtree_root: NodeIndex) -> Vec<NodeIndex, { consts::MAX_GROUP_SIZE / 2 }> {
+        tick!();
         let mut res = Vec::new();
 
         if let Ok(n) = LeafIndex::try_from(subtree_root) {

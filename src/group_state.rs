@@ -3,9 +3,10 @@ use crate::crypto::*;
 use crate::io::*;
 use crate::key_schedule::*;
 use crate::protocol::*;
+use crate::stack::*;
 use crate::syntax::*;
 use crate::treekem::*;
-use crate::{mls_struct, mls_struct_serialize};
+use crate::{mls_struct, mls_struct_serialize, stack_ptr, tick};
 
 mls_struct! {
     GroupState + GroupStateView,
@@ -24,6 +25,7 @@ mls_struct! {
 
 impl GroupState {
     pub fn epoch_authenticator(&self) -> HashOutput {
+        tick!();
         self.epoch_secret.epoch_authenticator()
     }
 }
@@ -34,6 +36,7 @@ impl SenderKeySource for GroupState {
         sender: LeafIndex,
         generation: Generation,
     ) -> Option<(AeadKey, AeadNonce)> {
+        tick!();
         let (gen, key, nonce) = self
             .epoch_secret
             .handshake_key(sender, self.ratchet_tree.size());

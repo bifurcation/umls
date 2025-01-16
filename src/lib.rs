@@ -19,6 +19,7 @@ use crypto::*;
 use group_state::*;
 use key_schedule::*;
 use protocol::*;
+use stack::*;
 use syntax::*;
 use treekem::*;
 
@@ -32,6 +33,7 @@ pub fn make_key_package(
     signature_key: SignaturePublicKey,
     credential: Credential,
 ) -> Result<(KeyPackagePriv, KeyPackage)> {
+    tick!();
     let (encryption_priv, encryption_key) = crypto::generate_hpke(rng)?;
     let (init_priv, init_key) = crypto::generate_hpke(rng)?;
 
@@ -85,6 +87,7 @@ pub fn create_group(
     key_package: KeyPackageView,
     group_id: GroupId,
 ) -> Result<GroupState> {
+    tick!();
     // Construct the ratchet tree
     let mut ratchet_tree = RatchetTree::default();
     ratchet_tree.add_leaf(key_package.leaf_node.to_object())?;
@@ -129,6 +132,7 @@ pub fn join_group(
     key_package: KeyPackageView,
     welcome: WelcomeView,
 ) -> Result<GroupState> {
+    tick!();
     // Verify that the Welcome is for us
     let kp_ref = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package.to_object())?;
     if welcome.secrets[0].new_member != kp_ref.as_view() {
@@ -231,6 +235,7 @@ pub fn send_commit(
     group_state: GroupStateView,
     operation: Operation,
 ) -> Result<(GroupState, PrivateMessage, Option<Welcome>)> {
+    tick!();
     let mut next = group_state.to_object();
 
     // Apply the operation and return the proposal that will communicate it
@@ -420,17 +425,11 @@ pub fn send_commit(
     Ok((next, private_message, welcome))
 }
 
-pub fn remove_member(
-    _group_state: GroupStateView,
-    _leaf_index: LeafIndex,
-) -> Result<(GroupState, PrivateMessage)> {
-    todo!();
-}
-
 pub fn handle_commit(
     group_state: GroupStateView,
     commit: PrivateMessageView,
 ) -> Result<GroupState> {
+    tick!();
     // Take ownership of the group state
     let mut next = group_state.to_object();
 

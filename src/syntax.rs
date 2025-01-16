@@ -1,5 +1,7 @@
 use crate::common::*;
 use crate::io::{CountWriter, ReadRef, Write};
+use crate::stack::*;
+use crate::{stack_ptr, tick};
 
 use core::convert::{TryFrom, TryInto};
 use core::marker::PhantomData;
@@ -37,6 +39,7 @@ where
     const MAX_SIZE: usize = T::MAX_SIZE;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
         (**self).serialize(writer)
     }
 }
@@ -77,12 +80,14 @@ impl Serialize for Nil {
     const MAX_SIZE: usize = 0;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
         Ok(())
     }
 }
 
 impl<'a> Deserialize<'a> for NilView<'a> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        tick!();
         Ok(NilView(&()))
     }
 }
@@ -99,6 +104,7 @@ impl<'a> ToObject for NilView<'a> {
     type Object = Nil;
 
     fn to_object(&self) -> Self::Object {
+        tick!();
         Nil
     }
 }
@@ -109,12 +115,14 @@ macro_rules! primitive_int_serde {
             const MAX_SIZE: usize = core::mem::size_of::<$int>();
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                tick!();
                 writer.write(&self.to_be_bytes())
             }
         }
 
         impl<'a> Deserialize<'a> for $int {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                tick!();
                 const N: usize = <$int>::MAX_SIZE;
                 let slice = reader.read_ref(N)?;
                 let array: [u8; N] = slice.try_into().map_err(|_| Error("Unknown error"))?;
@@ -134,6 +142,7 @@ macro_rules! primitive_int_serde {
             type Object = $int;
 
             fn to_object(&self) -> Self::Object {
+                tick!();
                 *self
             }
         }
@@ -156,6 +165,7 @@ macro_rules! mls_newtype_primitive {
 
         impl From<$int> for $owned_type {
             fn from(val: $int) -> Self {
+                tick!();
                 Self(val)
             }
         }
@@ -164,12 +174,14 @@ macro_rules! mls_newtype_primitive {
             type Target = $int;
 
             fn deref(&self) -> &Self::Target {
+                tick!();
                 &self.0
             }
         }
 
         impl DerefMut for $owned_type {
             fn deref_mut(&mut self) -> &mut Self::Target {
+                tick!();
                 &mut self.0
             }
         }
@@ -178,12 +190,14 @@ macro_rules! mls_newtype_primitive {
             const MAX_SIZE: usize = core::mem::size_of::<$int>();
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                tick!();
                 self.0.serialize(writer)
             }
         }
 
         impl<'a> From<$int> for $view_type<'a> {
             fn from(val: $int) -> Self {
+                tick!();
                 Self(val, PhantomData)
             }
         }
@@ -192,12 +206,14 @@ macro_rules! mls_newtype_primitive {
             type Target = $int;
 
             fn deref(&self) -> &Self::Target {
+                tick!();
                 &self.0
             }
         }
 
         impl<'a> Deserialize<'a> for $view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                tick!();
                 Ok(Self::from(<$int>::deserialize(reader)?))
             }
         }
@@ -214,6 +230,7 @@ macro_rules! mls_newtype_primitive {
             type Object = $owned_type;
 
             fn to_object(&self) -> Self::Object {
+                tick!();
                 $owned_type::from(self.0)
             }
         }
@@ -245,6 +262,7 @@ impl Serialize for Varint {
     const MAX_SIZE: usize = 4;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
         let val: u32 = self.0.try_into().map_err(|_| Error("Invalid value"))?;
         let mut data = val.to_be_bytes();
 
@@ -266,6 +284,7 @@ impl Serialize for Varint {
 
 impl<'a> Deserialize<'a> for Varint {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        tick!();
         let first_byte = reader.peek()?;
         let len = 1 << usize::from(first_byte >> 6);
         let data = reader.read_ref(len)?;
@@ -303,6 +322,7 @@ impl<'a> ToObject for Varint {
     type Object = Varint;
 
     fn to_object(&self) -> Self::Object {
+        tick!();
         *self
     }
 }
@@ -314,6 +334,7 @@ impl<T: Serialize, const N: usize> Serialize for Vec<T, N> {
     const MAX_SIZE: usize = Varint::size(N * T::MAX_SIZE) + N * T::MAX_SIZE;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
         // First, serialize everything to a writer that just counts how much would be serialized
         let mut counter = CountWriter::default();
         for val in self.iter() {
@@ -333,6 +354,7 @@ impl<T: Serialize, const N: usize> Serialize for Vec<T, N> {
 
 impl<'a, V: Deserialize<'a>, const N: usize> Deserialize<'a> for Vec<V, N> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        tick!();
         let len = Varint::deserialize(reader)?;
 
         let mut content = reader.take(len.0)?;
@@ -361,6 +383,7 @@ impl<'a, V: Deserialize<'a> + ToObject, const N: usize> ToObject for Vec<V, N> {
     type Object = Vec<V::Object, N>;
 
     fn to_object(&self) -> Self::Object {
+        tick!();
         self.iter().map(|v| v.to_object()).collect()
     }
 }
@@ -370,6 +393,7 @@ pub struct Raw<const N: usize>(Vec<u8, N>);
 
 impl<const N: usize> From<Vec<u8, N>> for Raw<N> {
     fn from(val: Vec<u8, N>) -> Self {
+        tick!();
         Self(val)
     }
 }
@@ -378,6 +402,7 @@ impl<const N: usize> TryFrom<&[u8]> for Raw<N> {
     type Error = Error;
 
     fn try_from(val: &[u8]) -> Result<Self> {
+        tick!();
         (val.len() == N)
             .then_some(Self(Vec::try_from(val).unwrap()))
             .ok_or(Error("Invalid object"))
@@ -386,12 +411,14 @@ impl<const N: usize> TryFrom<&[u8]> for Raw<N> {
 
 impl<const N: usize> AsRef<[u8]> for Raw<N> {
     fn as_ref(&self) -> &[u8] {
+        tick!();
         self.0.as_ref()
     }
 }
 
 impl<const N: usize> AsMut<[u8]> for Raw<N> {
     fn as_mut(&mut self) -> &mut [u8] {
+        tick!();
         self.0.as_mut()
     }
 }
@@ -403,6 +430,7 @@ impl<'a, const N: usize> TryFrom<&'a [u8]> for RawView<'a, N> {
     type Error = Error;
 
     fn try_from(val: &'a [u8]) -> Result<Self> {
+        tick!();
         (val.len() == N)
             .then_some(Self(val))
             .ok_or(Error("Too many items"))
@@ -411,6 +439,7 @@ impl<'a, const N: usize> TryFrom<&'a [u8]> for RawView<'a, N> {
 
 impl<'a, const N: usize> AsRef<[u8]> for RawView<'a, N> {
     fn as_ref(&self) -> &[u8] {
+        tick!();
         self.0
     }
 }
@@ -419,6 +448,7 @@ impl<const N: usize> Serialize for Raw<N> {
     const MAX_SIZE: usize = N;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
         if self.0.len() != N {
             return Err(Error("Invalid object"));
         }
@@ -431,6 +461,7 @@ impl<'a, const N: usize> Serialize for RawView<'a, N> {
     const MAX_SIZE: usize = N;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
         if self.0.len() != N {
             return Err(Error("Invalid object"));
         }
@@ -441,6 +472,7 @@ impl<'a, const N: usize> Serialize for RawView<'a, N> {
 
 impl<'a, const N: usize> Deserialize<'a> for RawView<'a, N> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        tick!();
         let content = reader.read_ref(N)?;
         Self::try_from(content)
     }
@@ -458,6 +490,7 @@ impl<'a, const N: usize> ToObject for RawView<'a, N> {
     type Object = Raw<N>;
 
     fn to_object(&self) -> Self::Object {
+        tick!();
         // Unwrap is safe here because RawView<N> can't be constructed with more than N elements
         Raw(self.0.try_into().unwrap())
     }
@@ -468,12 +501,14 @@ pub struct Opaque<const N: usize>(pub Vec<u8, N>);
 
 impl<const N: usize> From<Raw<N>> for Opaque<N> {
     fn from(val: Raw<N>) -> Self {
+        tick!();
         Opaque(val.0)
     }
 }
 
 impl<const N: usize> From<Vec<u8, N>> for Opaque<N> {
     fn from(val: Vec<u8, N>) -> Self {
+        tick!();
         Self(val)
     }
 }
@@ -482,6 +517,7 @@ impl<const N: usize> TryFrom<&[u8]> for Opaque<N> {
     type Error = Error;
 
     fn try_from(val: &[u8]) -> Result<Self> {
+        tick!();
         let vec = Vec::try_from(val).map_err(|_| Error("Too many values"))?;
         Ok(Self::from(vec))
     }
@@ -489,12 +525,14 @@ impl<const N: usize> TryFrom<&[u8]> for Opaque<N> {
 
 impl<const N: usize> AsRef<[u8]> for Opaque<N> {
     fn as_ref(&self) -> &[u8] {
+        tick!();
         self.0.as_ref()
     }
 }
 
 impl<const N: usize> AsMut<[u8]> for Opaque<N> {
     fn as_mut(&mut self) -> &mut [u8] {
+        tick!();
         self.0.as_mut()
     }
 }
@@ -506,6 +544,7 @@ impl<'a, const N: usize> TryFrom<&'a [u8]> for OpaqueView<'a, N> {
     type Error = Error;
 
     fn try_from(val: &'a [u8]) -> Result<Self> {
+        tick!();
         (val.len() <= N)
             .then_some(Self(val))
             .ok_or(Error("Too many items"))
@@ -514,6 +553,7 @@ impl<'a, const N: usize> TryFrom<&'a [u8]> for OpaqueView<'a, N> {
 
 impl<'a, const N: usize> AsRef<[u8]> for OpaqueView<'a, N> {
     fn as_ref(&self) -> &[u8] {
+        tick!();
         self.0
     }
 }
@@ -522,6 +562,7 @@ impl<const N: usize> Serialize for Opaque<N> {
     const MAX_SIZE: usize = Varint::size(N) + N;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
         Varint(self.0.len()).serialize(writer)?;
         writer.write(&self.0)
     }
@@ -531,6 +572,7 @@ impl<'a, const N: usize> Serialize for OpaqueView<'a, N> {
     const MAX_SIZE: usize = Varint::size(N) + N;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
         Varint(self.0.len()).serialize(writer)?;
         writer.write(self.0)
     }
@@ -538,6 +580,7 @@ impl<'a, const N: usize> Serialize for OpaqueView<'a, N> {
 
 impl<'a, const N: usize> Deserialize<'a> for OpaqueView<'a, N> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        tick!();
         let len = Varint::deserialize(reader)?;
         let content = reader.read_ref(len.0)?;
         Self::try_from(content)
@@ -556,6 +599,7 @@ impl<'a, const N: usize> ToObject for OpaqueView<'a, N> {
     type Object = Opaque<N>;
 
     fn to_object(&self) -> Self::Object {
+        tick!();
         // Unwrap is safe here because OpaqueView<N> can't be constructed with more than N elements
         Opaque(self.0.try_into().unwrap())
     }
@@ -591,12 +635,14 @@ macro_rules! mls_newtype_opaque {
 
         impl From<Opaque<{ $size }>> for $owned_type {
             fn from(val: Opaque<{ $size }>) -> Self {
+                tick!();
                 Self(val)
             }
         }
 
         impl From<$owned_type> for Opaque<{ $size }> {
             fn from(val: $owned_type) -> Self {
+                tick!();
                 val.0
             }
         }
@@ -605,12 +651,14 @@ macro_rules! mls_newtype_opaque {
             type Target = Opaque<{ $size }>;
 
             fn deref(&self) -> &Self::Target {
+                tick!();
                 &self.0
             }
         }
 
         impl DerefMut for $owned_type {
             fn deref_mut(&mut self) -> &mut Self::Target {
+                tick!();
                 &mut self.0
             }
         }
@@ -620,12 +668,14 @@ macro_rules! mls_newtype_opaque {
 
         impl<'a> From<OpaqueView<'a, { $size }>> for $view_type<'a> {
             fn from(val: OpaqueView<'a, { $size }>) -> Self {
+                tick!();
                 Self(val)
             }
         }
 
         impl<'a> From<$view_type<'a>> for OpaqueView<'a, { $size }> {
             fn from(val: $view_type<'a>) -> Self {
+                tick!();
                 val.0
             }
         }
@@ -634,6 +684,7 @@ macro_rules! mls_newtype_opaque {
             type Target = OpaqueView<'a, { $size }>;
 
             fn deref(&self) -> &Self::Target {
+                tick!();
                 &self.0
             }
         }
@@ -642,6 +693,7 @@ macro_rules! mls_newtype_opaque {
             const MAX_SIZE: usize = Opaque::<{ $size }>::MAX_SIZE;
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                tick!();
                 self.0.serialize(writer)
             }
         }
@@ -650,12 +702,14 @@ macro_rules! mls_newtype_opaque {
             const MAX_SIZE: usize = Opaque::<{ $size }>::MAX_SIZE;
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                tick!();
                 self.0.serialize(writer)
             }
         }
 
         impl<'a> Deserialize<'a> for $view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                tick!();
                 Ok(Self(OpaqueView::deserialize(reader)?))
             }
         }
@@ -672,6 +726,7 @@ macro_rules! mls_newtype_opaque {
             type Object = $owned_type;
 
             fn to_object(&self) -> Self::Object {
+                tick!();
                 $owned_type::from(self.0.to_object())
             }
         }
@@ -680,6 +735,7 @@ macro_rules! mls_newtype_opaque {
             type Error = Error;
 
             fn try_from(val: &[u8]) -> Result<Self> {
+                tick!();
                 let vec = Vec::try_from(val).map_err(|_| Error("Too many values"))?;
                 Ok(Self(Opaque::from(vec)))
             }
@@ -689,12 +745,14 @@ macro_rules! mls_newtype_opaque {
             type Error = Error;
 
             fn try_from(val: &'a [u8]) -> Result<Self> {
+                tick!();
                 Ok(Self(OpaqueView::try_from(val)?))
             }
         }
 
         impl AsRef<[u8]> for $owned_type {
             fn as_ref(&self) -> &[u8] {
+                tick!();
                 self.0.as_ref()
             }
         }
@@ -713,6 +771,7 @@ macro_rules! mls_struct_serialize {
             const MAX_SIZE: usize = sum(&[$($field_type::MAX_SIZE, )*]);
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+tick!();
                 $(self.$field_name.serialize(writer)?;)*
                 Ok(())
             }
@@ -735,6 +794,7 @@ macro_rules! mls_struct {
 
         impl<'a> Deserialize<'a> for $view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+tick!();
                 Ok(Self{
                     $($field_name: $field_view_type::deserialize(reader)?,)*
                 })
@@ -755,6 +815,7 @@ macro_rules! mls_struct {
             type Object = $owned_type;
 
             fn to_object(&self) -> Self::Object {
+tick!();
                 Self::Object {
                     $($field_name: self.$field_name.to_object(),)*
                 }
@@ -780,6 +841,7 @@ macro_rules! mls_enum {
             const MAX_SIZE: usize = $disc_type::MAX_SIZE + max(&[$($variant_type::MAX_SIZE, )*]);
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+tick!();
                 match self {
                     $(
                     Self::$variant_name(x) => {
@@ -793,6 +855,7 @@ macro_rules! mls_enum {
 
         impl<'a> Deserialize<'a> for $view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+tick!();
                 let disc = $disc_type::deserialize(reader)?;
                 match disc {
                     $($variant_disc => Ok(Self::$variant_name($variant_view_type::deserialize(reader)?)),)*
@@ -815,6 +878,7 @@ macro_rules! mls_enum {
             type Object = $owned_type;
 
             fn to_object(&self) -> Self::Object {
+tick!();
                 match self {
                     $(Self::$variant_name(x) => Self::Object::$variant_name(x.to_object()),)*
                 }

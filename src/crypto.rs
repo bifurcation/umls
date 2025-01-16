@@ -1,7 +1,8 @@
 use crate::common::*;
 use crate::io::*;
+use crate::stack::*;
 use crate::syntax::*;
-use crate::{mls_newtype_opaque, mls_newtype_primitive};
+use crate::{mls_newtype_opaque, mls_newtype_primitive, stack_ptr, tick};
 
 use aes_gcm::{AeadCore, AeadInPlace, Aes128Gcm, KeyInit};
 use core::marker::PhantomData;
