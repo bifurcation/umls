@@ -7,6 +7,7 @@ use crate::tree_math::*;
 use crate::{make_storage, mls_enum, mls_struct, mls_struct_serialize, serialize};
 
 use heapless::{FnvIndexMap, Vec};
+use itertools::Itertools;
 use rand::Rng;
 use rand_core::CryptoRngCore;
 
@@ -87,38 +88,39 @@ impl RatchetTreePriv {
     pub fn consistent(&self, ratchet_tree: &RatchetTree, my_index: LeafIndex) -> bool {
         let width: NodeCount = ratchet_tree.size().into();
         let encryption_key = crypto::hpke_priv_to_pub(&self.encryption_priv);
-        if ratchet_tree.leaf_node_at(my_index).unwrap().encryption_key != encryption_key.as_view() {
+        if ratchet_tree
+            .leaf_node_at(my_index)
+            .as_ref()
+            .unwrap()
+            .encryption_key
+            != encryption_key
+        {
             return false;
         }
 
         let mut i = 0;
         let mut curr = NodeIndex::from(my_index).parent(width);
         while let Some(parent) = curr {
-            if self.path_secrets[i].is_none() {
-                let unmerged = if let Some(Node::Parent(node)) = ratchet_tree.node_at(parent) {
-                    node.unmerged_leaves.contains(&my_index)
-                } else {
-                    false
-                };
+            let parent_index = ParentIndex::try_from(parent).unwrap();
+            let parent_node = ratchet_tree.parent_node_at(parent_index).as_ref();
+            let path_secret = self.path_secrets[i].as_ref();
 
-                if ratchet_tree.node_at(parent).is_some() && !unmerged {
-                    return false;
+            match (path_secret, parent_node) {
+                (Some(_), None) => return false,
+                (Some(path_secret), Some(node)) => {
+                    let node_secret = crypto::derive_secret(path_secret.as_view().into(), b"node");
+                    let (_, priv_key) = crypto::derive_hpke(node_secret.as_view()).unwrap();
+
+                    if node.public_key != priv_key {
+                        return false;
+                    }
                 }
-            } else {
-                if ratchet_tree.node_at(parent).is_none() {
-                    return false;
+                (None, Some(node)) => {
+                    if !node.unmerged_leaves.contains(&my_index) {
+                        return false;
+                    }
                 }
-
-                let parent_node = ratchet_tree.node_at(parent).as_ref().unwrap();
-                let tree_key = parent_node.encryption_key();
-
-                let path_secret = self.path_secrets[i].as_ref().unwrap();
-                let node_secret = crypto::derive_secret(path_secret.as_view().into(), b"node");
-                let (_, priv_key) = crypto::derive_hpke(node_secret.as_view()).unwrap();
-
-                if *tree_key != priv_key {
-                    return false;
-                }
+                (None, None) => {}
             }
 
             curr = parent.parent(width);
@@ -157,95 +159,234 @@ impl Node {
     }
 }
 
-type OptionalNode = Option<Node>;
-type OptionalNodeView<'a> = Option<NodeView<'a>>;
+struct ParentIndex(usize);
 
-// XXX(RLB) This is a wasteful in-memory representation, since every Node takes up the full
-// LeafNode worth of memory, even though a ParentNode is much smaller.  We could optimize this by
-// telling the compiler which nodes are leaf / parent nodes, for example:
-//
-// * Instead of a single NodeList, store a Vec<Option<LeafNode>> and a Vec<Option<ParentNode>>
-// * For referencing nodes by NodeIndex, make the translation in RatchetTree::node_at
-// * Write custom Serialize and Deserialize implementations that alternate as appropriate
-type NodeList = Vec<OptionalNode, { 2 * consts::MAX_GROUP_SIZE - 1 }>;
-type NodeListView<'a> = Vec<OptionalNodeView<'a>, { 2 * consts::MAX_GROUP_SIZE - 1 }>;
+impl TryFrom<NodeIndex> for ParentIndex {
+    type Error = Error;
+
+    fn try_from(val: NodeIndex) -> Result<Self> {
+        if val.is_leaf() {
+            return Err(Error("Malformed index"));
+        }
+
+        Ok(Self((val.0 - 1) / 2))
+    }
+}
 
 // TODO(RLB): Verify that this is the correct max size.
 type TreeHashCache = FnvIndexMap<(NodeIndex, usize), HashOutput, { consts::MAX_GROUP_SIZE }>;
 
-mls_struct! {
-    RatchetTree + RatchetTreeView,
-    nodes: NodeList + NodeListView,
+#[derive(Default, Clone, PartialEq, Debug)]
+pub struct RatchetTree {
+    leaf_nodes: Vec<Option<LeafNode>, { consts::MAX_GROUP_SIZE }>,
+    parent_nodes: Vec<Option<ParentNode>, { consts::MAX_GROUP_SIZE }>,
+}
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct RatchetTreeView<'a> {
+    leaf_nodes: Vec<Option<LeafNodeView<'a>>, { consts::MAX_GROUP_SIZE }>,
+    parent_nodes: Vec<Option<ParentNodeView<'a>>, { consts::MAX_GROUP_SIZE }>,
 }
 
 impl<'a> RatchetTreeView<'a> {
     pub fn size(&self) -> LeafCount {
-        NodeCount(self.nodes.len()).into()
+        LeafCount(self.leaf_nodes.len())
+    }
+}
+
+impl Serialize for RatchetTree {
+    const MAX_SIZE: usize = (Option::<LeafNode>::MAX_SIZE * consts::MAX_GROUP_SIZE)
+        + (Option::<ParentNode>::MAX_SIZE * (consts::MAX_GROUP_SIZE - 1));
+
+    // Serialize Vec<Option<Node>> without materializing it
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        let mut counter = CountWriter::default();
+        for node in self.node_iter() {
+            node.serialize(&mut counter)?;
+        }
+
+        Varint(counter.len()).serialize(writer)?;
+
+        for node in self.node_iter() {
+            node.serialize(writer)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a> Deserialize<'a> for RatchetTreeView<'a> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        let len = Varint::deserialize(reader)?;
+
+        let mut content = reader.take(len.0)?;
+        let mut leaf_nodes = Vec::new();
+        let mut parent_nodes = Vec::new();
+        let mut leaf = true;
+        while !content.is_empty() {
+            let node = Option::<NodeView>::deserialize(&mut content)?;
+            match node {
+                Some(NodeView::Leaf(node)) if leaf => leaf_nodes.push(Some(node)).unwrap(),
+                None if leaf => leaf_nodes.push(None).unwrap(),
+                Some(NodeView::Parent(node)) if !leaf => parent_nodes.push(Some(node)).unwrap(),
+                None if !leaf => parent_nodes.push(None).unwrap(),
+                _ => return Err(Error("Malformed ratchet tree")),
+            }
+
+            leaf = !leaf;
+        }
+
+        if parent_nodes.len() != leaf_nodes.len() - 1 {
+            return Err(Error("Malformed ratchet tree"));
+        }
+
+        // Pad leaf count to a power of two
+        while leaf_nodes.len().count_ones() > 1 {
+            leaf_nodes.push(None).unwrap();
+            parent_nodes.push(None).unwrap();
+        }
+
+        Ok(Self {
+            leaf_nodes,
+            parent_nodes,
+        })
+    }
+}
+
+impl AsView for RatchetTree {
+    type View<'a> = RatchetTreeView<'a>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        Self::View {
+            leaf_nodes: self.leaf_nodes.as_view(),
+            parent_nodes: self.parent_nodes.as_view(),
+        }
+    }
+}
+
+impl<'a> ToObject for RatchetTreeView<'a> {
+    type Object = RatchetTree;
+
+    fn to_object(&self) -> Self::Object {
+        Self::Object {
+            leaf_nodes: self.leaf_nodes.to_object(),
+            parent_nodes: self.parent_nodes.to_object(),
+        }
     }
 }
 
 impl RatchetTree {
-    fn node_at(&self, i: NodeIndex) -> &OptionalNode {
-        &self.nodes[i.0]
+    fn node_iter<'a>(&'a self) -> impl Iterator<Item = Option<Node>> + use<'a> {
+        let n_trailing_blanks = self
+            .leaf_nodes
+            .iter()
+            .rev()
+            .position(|n| n.is_some())
+            .unwrap();
+        let n_nodes = 2 * (self.leaf_nodes.len() - n_trailing_blanks) - 1;
+
+        let leaf_nodes = self
+            .leaf_nodes
+            .iter()
+            .map(|n| n.as_ref().map(|leaf| Node::Leaf(leaf.clone())));
+        let parent_nodes = self
+            .parent_nodes
+            .iter()
+            .map(|n| n.as_ref().map(|parent| Node::Parent(parent.clone())));
+
+        // Interleave nodes, and truncate trailing blank nodes
+        leaf_nodes.interleave(parent_nodes).take(n_nodes)
     }
 
-    fn node_at_mut(&mut self, i: NodeIndex) -> &mut OptionalNode {
-        &mut self.nodes[i.0]
+    pub fn leaf_node_at(&self, i: LeafIndex) -> &Option<LeafNode> {
+        &self.leaf_nodes[i.0 as usize]
+    }
+
+    fn parent_node_at(&self, i: ParentIndex) -> &Option<ParentNode> {
+        &self.parent_nodes[i.0]
+    }
+
+    fn leaf_node_at_mut(&mut self, i: LeafIndex) -> &mut Option<LeafNode> {
+        &mut self.leaf_nodes[i.0 as usize]
+    }
+
+    fn parent_node_at_mut(&mut self, i: ParentIndex) -> &mut Option<ParentNode> {
+        &mut self.parent_nodes[i.0]
+    }
+
+    fn encryption_key_at<'a>(&'a self, n: NodeIndex) -> Option<&'a HpkePublicKey> {
+        // TODO(RLB) Find a way to do this with match, maybe by making NodeIndex an enum?
+        if let Ok(n) = LeafIndex::try_from(n) {
+            self.leaf_node_at(n)
+                .as_ref()
+                .map(|node| &node.encryption_key)
+        } else {
+            let n = ParentIndex::try_from(n).unwrap();
+            self.parent_node_at(n).as_ref().map(|node| &node.public_key)
+        }
+    }
+
+    fn parent_hash_at(&self, n: NodeIndex) -> Option<HashOutput> {
+        // TODO(RLB) Find a way to do this with match, maybe by making NodeIndex an enum?
+        if let Ok(n) = LeafIndex::try_from(n) {
+            self.leaf_node_at(n)
+                .as_ref()
+                .and_then(|node| match &node.leaf_node_source {
+                    LeafNodeSource::Commit(parent_hash) => Some(parent_hash.clone()),
+                    _ => None,
+                })
+        } else {
+            let n = ParentIndex::try_from(n).unwrap();
+            self.parent_node_at(n)
+                .as_ref()
+                .map(|node| node.parent_hash.clone())
+        }
     }
 
     pub fn size(&self) -> LeafCount {
-        NodeCount(self.nodes.len()).into()
+        LeafCount(self.leaf_nodes.len())
     }
 
-    pub fn find(&self, leaf_node: LeafNodeView) -> Option<LeafIndex> {
-        let target = Some(NodeView::Leaf(leaf_node));
-        self.nodes
+    pub fn find(&self, target: LeafNodeView) -> Option<LeafIndex> {
+        let target = Some(target.clone());
+        self.leaf_nodes
             .iter()
-            .step_by(2)
             .position(|n| n.as_view() == target)
             .map(|i| LeafIndex(i as u32))
-    }
-
-    pub fn leaf_node_at(&self, index: LeafIndex) -> Option<LeafNodeView> {
-        self.node_at(index.into()).as_ref().and_then(|n| match n {
-            Node::Leaf(leaf_node) => Some(leaf_node.as_view()),
-            Node::Parent(_) => None,
-        })
     }
 
     pub fn add_leaf(&mut self, leaf_node: LeafNode) -> Result<LeafIndex> {
         // Assign to a blank leaf node if one exists
         let blank = self
-            .nodes
+            .leaf_nodes
             .iter()
-            .step_by(2)
             .position(|n| n.is_none())
             .map(|i| LeafIndex(i as u32));
         let joiner_leaf = if let Some(index) = blank {
             index
         } else {
-            let next_leaf = if self.nodes.is_empty() {
+            let next_leaf = if self.leaf_nodes.is_empty() {
                 LeafIndex(0)
             } else {
-                LeafIndex((self.nodes.len() as u32 + 1) / 2)
+                LeafIndex(self.leaf_nodes.len() as u32)
             };
 
             self.expand()?;
             next_leaf
         };
 
-        *self.node_at_mut(joiner_leaf.into()) = Some(Node::Leaf(leaf_node));
+        *self.leaf_node_at_mut(joiner_leaf) = Some(leaf_node);
 
         let mut curr: NodeIndex = joiner_leaf.into();
         while let Some(parent) = curr.parent(self.size().into()) {
             curr = parent;
 
-            let maybe_parent_node = self.node_at_mut(parent).as_mut();
+            let maybe_parent_node = self.parent_node_at_mut(parent.try_into()?).as_mut();
             if maybe_parent_node.is_none() {
                 continue;
             }
 
-            let Some(Node::Parent(parent_node)) = maybe_parent_node else {
+            let Some(parent_node) = maybe_parent_node else {
                 return Err(Error("Misconfigured tree"));
             };
 
@@ -256,7 +397,7 @@ impl RatchetTree {
     }
 
     pub fn remove_leaf(&mut self, removed: LeafIndex) -> Result<()> {
-        if self.node_at(removed.into()).is_none() {
+        if self.leaf_node_at(removed.into()).is_none() {
             return Err(Error("Member not in group"));
         }
 
@@ -287,10 +428,7 @@ impl RatchetTree {
         let leaf_index = LeafIndex::try_from(index)?;
         leaf_index.serialize(&mut h)?;
 
-        let optional_leaf = self.node_at(index).as_ref().and_then(|node| match node {
-            Node::Leaf(leaf_node) => Some(leaf_node),
-            Node::Parent(_) => unreachable!(),
-        });
+        let optional_leaf = self.leaf_node_at(leaf_index);
         optional_leaf.serialize(&mut h)?;
 
         Ok(h.finalize())
@@ -304,10 +442,7 @@ impl RatchetTree {
         // } ParentNodeHashInput;
         let mut h = Hash::new();
 
-        let optional_parent = self.node_at(index).as_ref().and_then(|node| match node {
-            Node::Leaf(_) => unreachable!(),
-            Node::Parent(parent_node) => Some(parent_node),
-        });
+        let optional_parent = self.parent_node_at(index.try_into()?);
         optional_parent.serialize(&mut h)?;
 
         self.hash(index.left().unwrap())?.serialize(&mut h)?;
@@ -317,29 +452,42 @@ impl RatchetTree {
     }
 
     fn expand(&mut self) -> Result<()> {
-        let width = 2 * self.nodes.len() + 1;
-        self.nodes
-            .resize_default(width)
+        let leaf_width = if self.leaf_nodes.is_empty() {
+            1
+        } else {
+            2 * self.leaf_nodes.len()
+        };
+        let parent_width = leaf_width - 1;
+        self.leaf_nodes
+            .resize_default(leaf_width)
+            .map_err(|_| Error("Resize error"))?;
+        self.parent_nodes
+            .resize_default(parent_width)
             .map_err(|_| Error("Resize error"))
     }
 
     fn truncate(&mut self) {
-        let mut start = self.nodes.len() / 2;
-        let mut end = self.nodes.len();
-        while start > 0 && self.nodes[start..end].iter().all(|n| n.is_none()) {
+        let mut start = self.leaf_nodes.len() / 2;
+        let mut end = self.leaf_nodes.len();
+        while start > 0 && self.leaf_nodes[start..end].iter().all(|n| n.is_none()) {
             end = start;
             start /= 2;
         }
 
-        self.nodes.resize_default(end).unwrap()
+        let leaf_width = end;
+        let parent_width = leaf_width - 1;
+        self.leaf_nodes.resize_default(leaf_width).unwrap();
+        self.parent_nodes.resize_default(parent_width).unwrap();
     }
 
     fn blank_path(&mut self, leaf_index: LeafIndex) {
         let node_index: NodeIndex = leaf_index.into();
-        *self.node_at_mut(node_index) = None;
+
+        *self.leaf_node_at_mut(leaf_index) = None;
+
         let mut p = node_index.parent(self.size().into());
         while let Some(index) = p {
-            *self.node_at_mut(index) = None;
+            *self.parent_node_at_mut(index.try_into().unwrap()) = None;
             p = index.parent(self.size().into());
         }
     }
@@ -387,7 +535,7 @@ impl RatchetTree {
         let parent_hash = self.merge(&nodes, from)?;
 
         // Re-sign the leaf node
-        let Some(Node::Leaf(leaf_node)) = self.node_at_mut(from.into()).as_mut() else {
+        let Some(leaf_node) = self.leaf_node_at_mut(from).as_mut() else {
             return Err(Error("Encap from blank leaf"));
         };
 
@@ -412,7 +560,7 @@ impl RatchetTree {
     }
 
     pub fn merge_leaf(&mut self, from: LeafIndex, leaf_node: LeafNode) {
-        self.node_at_mut(from.into()).replace(Node::Leaf(leaf_node));
+        self.leaf_node_at_mut(from).replace(leaf_node);
     }
 
     pub fn encrypt_path_secrets(
@@ -441,12 +589,7 @@ impl RatchetTree {
         for ((ps, res), enc) in filtered_priv.zip(resolutions).zip(encrypted_path_secret) {
             let raw_path_secret = Raw::try_from(ps.as_ref())?;
             for n in res.iter() {
-                let encryption_node = self
-                    .node_at(*n)
-                    .as_ref()
-                    .ok_or(Error("Blank node in resolution"))?;
-
-                let encryption_key = encryption_node.encryption_key().as_view();
+                let encryption_key = self.encryption_key_at(*n).unwrap().as_view();
                 let encrypted_path_secret = EncryptedPathSecret::seal(
                     rng,
                     raw_path_secret.clone(),
@@ -574,7 +717,7 @@ impl RatchetTree {
             return Ok(HashOutput::default());
         };
 
-        let Some(Node::Parent(parent)) = self.node_at(p) else {
+        let Some(parent) = self.parent_node_at(p.try_into()?) else {
             unreachable!();
         };
 
@@ -609,11 +752,11 @@ impl RatchetTree {
             let parent_hash = self.parent_hash_now(*n, last_parent, from)?;
             last_parent.replace(*n);
 
-            *self.node_at_mut(*n) = Some(Node::Parent(ParentNode {
+            *self.parent_node_at_mut(ParentIndex::try_from(*n).unwrap()) = Some(ParentNode {
                 public_key: public_key.clone(),
                 parent_hash: parent_hash,
                 unmerged_leaves: Default::default(),
-            }));
+            });
         }
 
         self.parent_hash_now(from.into(), last_parent, from)
@@ -660,14 +803,14 @@ impl RatchetTree {
             let right_hash =
                 self.original_tree_hash(cache, index.right().unwrap(), &local_except)?;
 
-            let parent_node = self.node_at(index).as_ref().map(|n| match n {
-                Node::Parent(parent) => {
+            let parent_node = self
+                .parent_node_at(index.try_into()?)
+                .as_ref()
+                .map(|parent| {
                     let mut parent = parent.clone();
                     parent.unmerged_leaves.retain(|i| !local_except.contains(i));
                     parent
-                }
-                _ => unreachable!(),
-            });
+                });
 
             let mut h = Hash::new();
             parent_node.serialize(&mut h)?;
@@ -688,7 +831,8 @@ impl RatchetTree {
         parent: NodeIndex,
         sibling: NodeIndex,
     ) -> Result<HashOutput> {
-        let Some(Node::Parent(parent_node)) = self.node_at(parent) else {
+        let parent_index = ParentIndex::try_from(parent).unwrap();
+        let Some(parent_node) = self.parent_node_at(parent_index) else {
             unreachable!();
         };
 
@@ -704,16 +848,8 @@ impl RatchetTree {
     fn has_parent_hash(&self, node: NodeIndex, target_hash: HashOutput) -> bool {
         self.resolve(node)
             .iter()
-            .filter_map(|n| {
-                self.node_at(*n).as_ref().and_then(|node| match node {
-                    Node::Parent(parent) => Some(&parent.parent_hash),
-                    Node::Leaf(leaf) => match &leaf.leaf_node_source {
-                        LeafNodeSource::Commit(parent_hash) => Some(parent_hash),
-                        _ => None,
-                    },
-                })
-            })
-            .any(|parent_hash| *parent_hash == target_hash)
+            .filter_map(|&n| self.parent_hash_at(n))
+            .any(|parent_hash| parent_hash == target_hash)
     }
 
     pub fn parent_hash_valid(&self) -> Result<bool> {
@@ -726,8 +862,11 @@ impl RatchetTree {
             let start = (stride >> 1) - 1;
 
             for p in (start..width.0).step_by(stride) {
-                let p = NodeIndex(p);
-                if self.node_at(p).is_none() {
+                let p = NodeIndex(p); // TODO simplify
+                if self
+                    .parent_node_at(ParentIndex::try_from(p).unwrap())
+                    .is_none()
+                {
                     continue;
                 }
 
@@ -763,27 +902,34 @@ impl RatchetTree {
     fn resolve(&self, subtree_root: NodeIndex) -> Vec<NodeIndex, { consts::MAX_GROUP_SIZE / 2 }> {
         let mut res = Vec::new();
 
-        match self.node_at(subtree_root) {
-            // The resolution of a non-blank node comprises the node itself, followed by its list of
-            // unmerged leaves, if any.
-            Some(Node::Leaf(node)) => res.push(subtree_root).unwrap(),
-            Some(Node::Parent(node)) => {
-                res.push(subtree_root).unwrap();
-                res.extend(node.unmerged_leaves.iter().map(|&i| i.into()));
+        if let Ok(n) = LeafIndex::try_from(subtree_root) {
+            match self.leaf_node_at(n) {
+                // The resolution of a non-blank leaf node comprises the node itself
+                Some(_) => res.push(subtree_root).unwrap(),
+
+                // The resolution of a blank leaf node is the empty list.
+                None => {}
             }
+        } else {
+            let n = ParentIndex::try_from(subtree_root).unwrap();
+            match self.parent_node_at(n) {
+                // The resolution of a non-blank parent node comprises the node itself, followed by
+                // its unmerged leaves
+                Some(node) => {
+                    res.push(subtree_root).unwrap();
+                    res.extend(node.unmerged_leaves.iter().map(|&i| i.into()));
+                }
 
-            // The resolution of a blank leaf node is the empty list.
-            None if subtree_root.is_leaf() => {}
+                // The resolution of a blank intermediate node is the result of concatenating the
+                // resolution of its left child with the resolution of its right child, in that
+                // order.todo!()
+                None => {
+                    let left = subtree_root.left().unwrap();
+                    res.extend_from_slice(&self.resolve(left)).unwrap();
 
-            // The resolution of a blank intermediate node is the result of concatenating the
-            // resolution of its left child with the resolution of its right child, in that
-            // order.todo!()
-            None => {
-                let left = subtree_root.left().unwrap();
-                res.extend_from_slice(&self.resolve(left)).unwrap();
-
-                let right = subtree_root.right().unwrap();
-                res.extend_from_slice(&self.resolve(right)).unwrap();
+                    let right = subtree_root.right().unwrap();
+                    res.extend_from_slice(&self.resolve(right)).unwrap();
+                }
             }
         }
 

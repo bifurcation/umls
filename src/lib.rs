@@ -185,7 +185,7 @@ pub fn join_group(
             return Err(Error("GroupInfo signer not present in tree"));
         };
 
-        group_info.verify(signer_leaf.signature_key)?;
+        group_info.verify(signer_leaf.signature_key.as_view())?;
     }
 
     // Update the key schedule
@@ -446,7 +446,7 @@ pub fn handle_commit(
 
         signed_framed_content
             .as_view()
-            .verify(signer_leaf.signature_key)?;
+            .verify(signer_leaf.signature_key.as_view())?;
     }
 
     // Unwrap the Commit and apply it to the ratchet tree

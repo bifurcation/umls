@@ -5,7 +5,7 @@ use heapless::Vec;
 pub trait Write {
     /// Write a buffer to the stream.  Return an error if it was not possible to write the whole
     /// buffer.
-    fn write(&mut self, buf: &[u8]) -> Result<()>;
+    fn write(&mut self, data: &[u8]) -> Result<()>;
 }
 
 pub trait ReadRef<'a>: Sized {
