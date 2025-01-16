@@ -1,4 +1,7 @@
-use umls::{crypto, group_state::*, protocol::*, stack::stack_usage, syntax::*, Operation};
+use umls::{
+    crypto, group_state::GroupState, protocol::*, stack::stack_usage, syntax::*, MlsGroup,
+    Operation,
+};
 
 fn main() {
     let mut rng = rand::thread_rng();
@@ -12,7 +15,7 @@ fn main() {
     // Create the group
     let group_id = GroupId::from(Opaque::try_from(b"group_id".as_slice()).unwrap());
     let (mut state_a, create_group_stack) = stack_usage(|| {
-        umls::create_group(&mut rng, kp_priv.as_view(), kp.as_view(), group_id).unwrap()
+        GroupState::create(&mut rng, kp_priv.as_view(), kp.as_view(), group_id).unwrap()
     });
 
     // Create the second user
@@ -24,11 +27,11 @@ fn main() {
     // Add the second user to the group
     let op = Operation::Add(kp.clone());
     let ((_commit_1, welcome_1), send_commit_1_stack) =
-        stack_usage(|| umls::send_commit(&mut rng, &mut state_a, op).unwrap());
+        stack_usage(|| state_a.send_commit(&mut rng, op).unwrap());
 
     // Second user joins the group
     let (mut state_b, join_group_1_stack) = stack_usage(|| {
-        umls::join_group(
+        GroupState::join(
             kp_priv.as_view(),
             kp.as_view(),
             welcome_1.unwrap().as_view(),
@@ -54,11 +57,11 @@ fn main() {
         // Add the third user to the group
         let op = Operation::Add(kp.clone());
         let ((commit_2, welcome_2), send_commit_2_stack) =
-            stack_usage(|| umls::send_commit(&mut rng, &mut state_b, op).unwrap());
+            stack_usage(|| state_b.send_commit(&mut rng, op).unwrap());
 
         // Second user joins the group
-        let (state_c, join_group_2_stack) = stack_usage(|| {
-            umls::join_group(
+        let (_state_c, join_group_2_stack) = stack_usage(|| {
+            GroupState::join(
                 kp_priv.as_view(),
                 kp.as_view(),
                 welcome_2.unwrap().as_view(),
@@ -68,7 +71,7 @@ fn main() {
 
         // Other member handles the commit
         let ((), handle_commit_2_stack) =
-            stack_usage(|| umls::handle_commit(&mut state_a, commit_2.as_view()).unwrap());
+            stack_usage(|| state_a.handle_commit(commit_2.as_view()).unwrap());
 
         println!("===");
         println!("make_key_package_2: {:8}", make_key_package_2_stack);
