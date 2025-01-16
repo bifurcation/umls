@@ -232,11 +232,15 @@ pub enum Operation {
 
 pub fn send_commit(
     rng: &mut (impl Rng + CryptoRngCore),
-    group_state: GroupStateView,
+    group_state: &mut GroupState,
     operation: Operation,
-) -> Result<(GroupState, PrivateMessage, Option<Welcome>)> {
+) -> Result<(PrivateMessage, Option<Welcome>)> {
     tick!();
-    let mut next = group_state.to_object();
+
+    // Snapshot off required bits of the previous state
+    let group_context_prev = group_state.group_context.clone();
+    let epoch_secret_prev = group_state.epoch_secret.clone();
+    let ratchet_tree_size_prev = group_state.ratchet_tree.size();
 
     // Apply the operation and return the proposal that will communicate it
     let (proposal, joiner_location) = match operation {
@@ -247,17 +251,19 @@ pub fn send_commit(
             key_package.tbs.leaf_node.as_view().verify(signature_key)?;
 
             // Add the joiner to the tree
-            let joiner_location = next.ratchet_tree.add_leaf(key_package.leaf_node.clone())?;
+            let joiner_location = group_state
+                .ratchet_tree
+                .add_leaf(key_package.leaf_node.clone())?;
 
             (Proposal::Add(Add { key_package }), Some(joiner_location))
         }
         Operation::Remove(removed) => {
             // Remove the member from the tree
-            next.ratchet_tree.remove_leaf(removed)?;
-            next.my_ratchet_tree_priv.blank_path(
-                next.my_index,
+            group_state.ratchet_tree.remove_leaf(removed)?;
+            group_state.my_ratchet_tree_priv.blank_path(
+                group_state.my_index,
                 removed,
-                next.ratchet_tree.size().into(),
+                group_state.ratchet_tree.size().into(),
             );
 
             (Proposal::Remove(Remove { removed }), None)
@@ -265,29 +271,29 @@ pub fn send_commit(
     };
 
     // Update the committer's direct path
-    let (ratchet_tree_priv, update_path) = next.ratchet_tree.update_direct_path(
+    let (ratchet_tree_priv, update_path) = group_state.ratchet_tree.update_direct_path(
         rng,
-        next.my_index,
-        next.my_signature_priv.as_view(),
+        group_state.my_index,
+        group_state.my_signature_priv.as_view(),
     )?;
 
-    // Encrypt a new secret to the group, using a provisional group context
-    next.group_context.epoch.0 += 1;
-    next.group_context.tree_hash = next.ratchet_tree.root_hash()?;
+    group_state.my_ratchet_tree_priv = ratchet_tree_priv;
 
-    let update_path = next.ratchet_tree.encrypt_path_secrets(
+    // Encrypt a new secret to the group, using a provisional group context
+    group_state.group_context.epoch.0 += 1;
+    group_state.group_context.tree_hash = group_state.ratchet_tree.root_hash()?;
+
+    let update_path = group_state.ratchet_tree.encrypt_path_secrets(
         rng,
-        next.my_index,
-        &next.group_context,
-        &ratchet_tree_priv,
+        group_state.my_index,
+        &group_state.group_context,
+        &group_state.my_ratchet_tree_priv,
         update_path,
     )?;
 
-    next.my_ratchet_tree_priv = ratchet_tree_priv;
-
-    assert!(next
+    assert!(group_state
         .my_ratchet_tree_priv
-        .consistent(&next.ratchet_tree, next.my_index));
+        .consistent(&group_state.ratchet_tree, group_state.my_index));
 
     // Form the Commit and the enclosing SignedFramedContent
     let mut commit = Commit {
@@ -301,9 +307,9 @@ pub fn send_commit(
 
     let authenticated_data = PrivateMessageAad::default();
     let framed_content = FramedContent {
-        group_id: group_state.group_context.group_id.to_object(),
-        epoch: group_state.group_context.epoch.to_object(),
-        sender: Sender::Member(group_state.my_index.to_object()),
+        group_id: group_context_prev.group_id.clone(),
+        epoch: group_context_prev.epoch.clone(),
+        sender: Sender::Member(group_state.my_index.clone()),
         authenticated_data: authenticated_data.clone(),
         content: MessageContent::Commit(commit),
     };
@@ -312,42 +318,40 @@ pub fn send_commit(
         version: protocol::consts::SUPPORTED_VERSION,
         wire_format: protocol::consts::SUPPORTED_WIRE_FORMAT,
         content: framed_content,
-        binder: FramedContentBinder::Member(group_state.group_context.to_object()),
+        binder: FramedContentBinder::Member(group_context_prev),
     };
 
     let signed_framed_content =
-        SignedFramedContent::new(framed_content_tbs, group_state.my_signature_priv)?;
+        SignedFramedContent::new(framed_content_tbs, group_state.my_signature_priv.as_view())?;
 
     // Update the confirmed transcript hash
-    next.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
-        group_state.interim_transcript_hash,
+    group_state.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
+        group_state.interim_transcript_hash.as_view(),
         &signed_framed_content.content,
         &signed_framed_content.signature,
     )?;
 
     // Ratchet forward the key schedule
-    let commit_secret = next.my_ratchet_tree_priv.commit_secret();
-    let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = group_state
-        .epoch_secret
-        .advance(commit_secret.as_view(), &next.group_context)?;
+    let commit_secret = group_state.my_ratchet_tree_priv.commit_secret();
+    let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = epoch_secret_prev
+        .as_view()
+        .advance(commit_secret.as_view(), &group_state.group_context)?;
 
-    next.epoch_secret = epoch_secret;
+    group_state.epoch_secret = epoch_secret;
 
     // Form the PrivateMessage
-    let confirmation_tag = next
+    let confirmation_tag = group_state
         .epoch_secret
-        .confirmation_tag(&next.group_context.confirmed_transcript_hash);
-    next.interim_transcript_hash = transcript_hash::interim(
-        &next.group_context.confirmed_transcript_hash,
+        .confirmation_tag(&group_state.group_context.confirmed_transcript_hash);
+    group_state.interim_transcript_hash = transcript_hash::interim(
+        &group_state.group_context.confirmed_transcript_hash,
         &confirmation_tag,
     )?;
-    let (generation, key, nonce) = group_state
-        .epoch_secret
-        .to_object()
-        .handshake_key(next.my_index, group_state.ratchet_tree.size());
+    let (generation, key, nonce) =
+        epoch_secret_prev.handshake_key(group_state.my_index, ratchet_tree_size_prev);
 
     let sender_data = SenderData {
-        leaf_index: next.my_index,
+        leaf_index: group_state.my_index,
         generation: Generation(generation),
         reuse_guard: ReuseGuard(rng.gen()),
     };
@@ -358,20 +362,16 @@ pub fn send_commit(
         sender_data,
         key,
         nonce,
-        group_state
-            .epoch_secret
-            .to_object()
-            .sender_data_secret()
-            .as_view(),
+        epoch_secret_prev.sender_data_secret().as_view(),
         authenticated_data,
     )?;
 
     // Form the Welcome if required
     let welcome = if let Proposal::Add(Add { key_package }) = &proposal {
         let joiner_location = joiner_location.unwrap();
-        let path_secret = next.ratchet_tree.select_path_secret(
-            &next.my_ratchet_tree_priv,
-            next.my_index,
+        let path_secret = group_state.ratchet_tree.select_path_secret(
+            &group_state.my_ratchet_tree_priv,
+            group_state.my_index,
             joiner_location,
         )?;
 
@@ -395,7 +395,7 @@ pub fn send_commit(
 
         let secrets = [encrypted_group_secrets].as_ref().try_into().unwrap();
 
-        let ratchet_tree_data = serialize!(RatchetTree, next.ratchet_tree);
+        let ratchet_tree_data = serialize!(RatchetTree, group_state.ratchet_tree);
         let ratchet_tree_extension = GroupInfoExtension {
             extension_type: protocol::consts::EXTENSION_TYPE_RATCHET_TREE,
             extension_data: Opaque(ratchet_tree_data).into(),
@@ -403,13 +403,13 @@ pub fn send_commit(
         let group_info_extensions = [ratchet_tree_extension].as_ref().try_into().unwrap();
 
         let group_info_tbs = GroupInfoTbs {
-            group_context: next.group_context.clone(),
+            group_context: group_state.group_context.clone(),
             extensions: group_info_extensions,
             confirmation_tag: confirmation_tag.clone(),
-            signer: next.my_index,
+            signer: group_state.my_index,
         };
 
-        let group_info = GroupInfo::new(group_info_tbs, next.my_signature_priv.as_view())?;
+        let group_info = GroupInfo::new(group_info_tbs, group_state.my_signature_priv.as_view())?;
         let encrypted_group_info =
             EncryptedGroupInfo::seal(group_info, welcome_key, welcome_nonce, &[])?;
 
@@ -422,25 +422,20 @@ pub fn send_commit(
         None
     };
 
-    Ok((next, private_message, welcome))
+    Ok((private_message, welcome))
 }
 
-pub fn handle_commit(
-    group_state: GroupStateView,
-    commit: PrivateMessageView,
-) -> Result<GroupState> {
+pub fn handle_commit(group_state: &mut GroupState, commit: PrivateMessageView) -> Result<()> {
     tick!();
-    // Take ownership of the group state
-    let mut next = group_state.to_object();
 
     // Unwrap the PrivateMessage and verify its signature
-    let sender_data_secret = next.epoch_secret.sender_data_secret();
+    let sender_data_secret = group_state.epoch_secret.sender_data_secret();
     let (signed_framed_content, confirmation_tag_message) =
-        commit.open(&sender_data_secret, &next, &next.group_context)?;
+        commit.open(&sender_data_secret, group_state, &group_state.group_context)?;
 
     let Sender::Member(sender) = signed_framed_content.content.sender;
     {
-        let Some(signer_leaf) = next.ratchet_tree.leaf_node_at(sender) else {
+        let Some(signer_leaf) = group_state.ratchet_tree.leaf_node_at(sender) else {
             return Err(Error("Commit signer not present in tree"));
         };
 
@@ -460,15 +455,16 @@ pub fn handle_commit(
 
     match proposal {
         Proposal::Add(add) => {
-            next.ratchet_tree
+            group_state
+                .ratchet_tree
                 .add_leaf(add.key_package.leaf_node.clone())?;
         }
         Proposal::Remove(remove) => {
-            next.ratchet_tree.remove_leaf(remove.removed)?;
-            next.my_ratchet_tree_priv.blank_path(
-                next.my_index,
+            group_state.ratchet_tree.remove_leaf(remove.removed)?;
+            group_state.my_ratchet_tree_priv.blank_path(
+                group_state.my_index,
                 remove.removed,
-                next.ratchet_tree.size().into(),
+                group_state.ratchet_tree.size().into(),
             );
         }
     }
@@ -478,61 +474,63 @@ pub fn handle_commit(
         .path
         .as_ref()
         .ok_or(Error("No update path in Commit"))?;
-    let parent_hash = next.ratchet_tree.merge(&update_path.nodes, sender)?;
+    let parent_hash = group_state.ratchet_tree.merge(&update_path.nodes, sender)?;
 
     if update_path.leaf_node.leaf_node_source != LeafNodeSource::Commit(parent_hash) {
         return Err(Error("Invalid parent hash"));
     }
-    next.ratchet_tree
+    group_state
+        .ratchet_tree
         .merge_leaf(sender, update_path.leaf_node.clone());
 
     // Decapsulate the UpdatePath
-    next.group_context.epoch.0 += 1;
-    next.group_context.tree_hash = next.ratchet_tree.root_hash()?;
+    group_state.group_context.epoch.0 += 1;
+    group_state.group_context.tree_hash = group_state.ratchet_tree.root_hash()?;
 
-    next.ratchet_tree.decap(
-        &mut next.my_ratchet_tree_priv,
+    group_state.ratchet_tree.decap(
+        &mut group_state.my_ratchet_tree_priv,
         update_path.as_view(),
         sender,
-        next.my_index,
-        &next.group_context,
+        group_state.my_index,
+        &group_state.group_context,
     )?;
 
-    assert!(next
+    assert!(group_state
         .my_ratchet_tree_priv
-        .consistent(&next.ratchet_tree, next.my_index));
+        .consistent(&group_state.ratchet_tree, group_state.my_index));
 
     // Update the confirmed transcript hash
-    next.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
-        group_state.interim_transcript_hash,
+    group_state.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
+        group_state.interim_transcript_hash.as_view(),
         &signed_framed_content.content,
         &signed_framed_content.signature,
     )?;
 
     // Ratchet forward the key schedule
-    let commit_secret = next.my_ratchet_tree_priv.commit_secret();
+    let commit_secret = group_state.my_ratchet_tree_priv.commit_secret();
     let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = group_state
         .epoch_secret
-        .advance(commit_secret.as_view(), &next.group_context)?;
+        .as_view()
+        .advance(commit_secret.as_view(), &group_state.group_context)?;
 
-    next.epoch_secret = epoch_secret;
+    group_state.epoch_secret = epoch_secret;
 
     // Verify the confirmation tag
-    let confirmation_tag_computed = next
+    let confirmation_tag_computed = group_state
         .epoch_secret
-        .confirmation_tag(&next.group_context.confirmed_transcript_hash);
+        .confirmation_tag(&group_state.group_context.confirmed_transcript_hash);
 
     // XXX(RLB) Constant-time equality check?
     if confirmation_tag_message != confirmation_tag_computed {
         return Err(Error("Invalid confirmation tag"));
     }
 
-    next.interim_transcript_hash = transcript_hash::interim(
-        &next.group_context.confirmed_transcript_hash,
+    group_state.interim_transcript_hash = transcript_hash::interim(
+        &group_state.group_context.confirmed_transcript_hash,
         &confirmation_tag_computed,
     )?;
 
-    Ok(next)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -578,21 +576,18 @@ mod test {
             let (kp_priv, kp) = make_user(&mut rng, joiner_name);
             let op = Operation::Add(kp.clone());
 
-            let committer_prev = self.states[committer].take().unwrap();
-            let (committer_next, commit, welcome) =
-                send_commit(&mut rng, committer_prev.as_view(), op).unwrap();
+            let mut committer_state = self.states[committer].take().unwrap();
+            let (commit, welcome) = send_commit(&mut rng, &mut committer_state, op).unwrap();
             let joiner_next =
                 join_group(kp_priv.as_view(), kp.as_view(), welcome.unwrap().as_view()).unwrap();
 
             // Everyone in the group handles the commit (note that committer is currently None)
             for state in self.states.iter_mut().filter(|s| s.is_some()) {
-                let prev = state.take().unwrap();
-                let next = handle_commit(prev.as_view(), commit.as_view()).unwrap();
-                *state = Some(next);
+                handle_commit(state.as_mut().unwrap(), commit.as_view()).unwrap();
             }
 
             // Committer transitions to a new state
-            self.states[committer] = Some(committer_next);
+            self.states[committer] = Some(committer_state);
 
             // Insert the joiner at the proper location
             let joiner = match self.states.iter().position(|s| s.is_none()) {
@@ -613,22 +608,19 @@ mod test {
 
             let op = Operation::Remove(LeafIndex(removed as u32));
 
-            let committer_prev = self.states[committer].take().unwrap();
-            let (committer_next, commit, welcome) =
-                send_commit(&mut rng, committer_prev.as_view(), op).unwrap();
+            let mut committer_state = self.states[committer].take().unwrap();
+            let (commit, welcome) = send_commit(&mut rng, &mut committer_state, op).unwrap();
 
             // Remove the removed member
             self.states[removed] = None;
 
             // Everyone in the group handles the commit (note that committer is currently None)
             for state in self.states.iter_mut().filter(|s| s.is_some()) {
-                let prev = state.take().unwrap();
-                let next = handle_commit(prev.as_view(), commit.as_view()).unwrap();
-                *state = Some(next);
+                handle_commit(state.as_mut().unwrap(), commit.as_view()).unwrap();
             }
 
             // Committer transitions to a new state
-            self.states[committer] = Some(committer_next);
+            self.states[committer] = Some(committer_state);
         }
 
         fn random_action(&mut self) {

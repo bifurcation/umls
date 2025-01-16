@@ -11,7 +11,7 @@ fn main() {
 
     // Create the group
     let group_id = GroupId::from(Opaque::try_from(b"group_id".as_slice()).unwrap());
-    let (state_a0, create_group_stack) = stack_usage(|| {
+    let (mut state_a, create_group_stack) = stack_usage(|| {
         umls::create_group(&mut rng, kp_priv.as_view(), kp.as_view(), group_id).unwrap()
     });
 
@@ -23,11 +23,11 @@ fn main() {
 
     // Add the second user to the group
     let op = Operation::Add(kp.clone());
-    let ((state_a1, _commit_1, welcome_1), send_commit_1_stack) =
-        stack_usage(|| umls::send_commit(&mut rng, state_a0.as_view(), op).unwrap());
+    let ((_commit_1, welcome_1), send_commit_1_stack) =
+        stack_usage(|| umls::send_commit(&mut rng, &mut state_a, op).unwrap());
 
     // Second user joins the group
-    let (state_b1, join_group_1_stack) = stack_usage(|| {
+    let (mut state_b, join_group_1_stack) = stack_usage(|| {
         umls::join_group(
             kp_priv.as_view(),
             kp.as_view(),
@@ -53,11 +53,11 @@ fn main() {
 
         // Add the third user to the group
         let op = Operation::Add(kp.clone());
-        let ((state_b2, commit_2, welcome_2), send_commit_2_stack) =
-            stack_usage(|| umls::send_commit(&mut rng, state_b1.as_view(), op).unwrap());
+        let ((commit_2, welcome_2), send_commit_2_stack) =
+            stack_usage(|| umls::send_commit(&mut rng, &mut state_b, op).unwrap());
 
         // Second user joins the group
-        let (state_c2, join_group_2_stack) = stack_usage(|| {
+        let (state_c, join_group_2_stack) = stack_usage(|| {
             umls::join_group(
                 kp_priv.as_view(),
                 kp.as_view(),
@@ -67,8 +67,8 @@ fn main() {
         });
 
         // Other member handles the commit
-        let (state_a2, handle_commit_2_stack) =
-            stack_usage(|| umls::handle_commit(state_a1.as_view(), commit_2.as_view()).unwrap());
+        let ((), handle_commit_2_stack) =
+            stack_usage(|| umls::handle_commit(&mut state_a, commit_2.as_view()).unwrap());
 
         println!("===");
         println!("make_key_package_2: {:8}", make_key_package_2_stack);
