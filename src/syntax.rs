@@ -228,7 +228,7 @@ impl Varint {
     const MAX_2: usize = 1 << 14;
     const MAX_4: usize = 1 << 30;
 
-    const fn size(n: usize) -> usize {
+    pub const fn size(n: usize) -> usize {
         match n {
             n if n < Self::MAX_1 => 1,
             n if n < Self::MAX_2 => 2,

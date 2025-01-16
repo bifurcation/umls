@@ -22,6 +22,8 @@ fn main() {
         type_info::<SignaturePrivateKey>(),
         type_info::<SignaturePublicKey>(),
         type_info::<Credential>(),
+        type_info::<LeafNodePriv>(),
+        type_info::<LeafNode>(),
         type_info::<KeyPackagePriv>(),
         type_info::<KeyPackage>(),
         type_info::<GroupId>(),

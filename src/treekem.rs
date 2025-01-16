@@ -195,8 +195,8 @@ impl<'a> RatchetTreeView<'a> {
 }
 
 impl Serialize for RatchetTree {
-    const MAX_SIZE: usize = (Option::<LeafNode>::MAX_SIZE * consts::MAX_GROUP_SIZE)
-        + (Option::<ParentNode>::MAX_SIZE * (consts::MAX_GROUP_SIZE - 1));
+    const MAX_SIZE: usize =
+        Self::MAX_LENGTH_HEADER_SIZE + Self::MAX_LEAF_NODES_SIZE + Self::MAX_PARENT_NODES_SIZE;
 
     // Serialize Vec<Option<Node>> without materializing it
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
@@ -276,6 +276,12 @@ impl<'a> ToObject for RatchetTreeView<'a> {
 }
 
 impl RatchetTree {
+    const MAX_LEAF_NODES_SIZE: usize = Option::<LeafNode>::MAX_SIZE * consts::MAX_GROUP_SIZE;
+    const MAX_PARENT_NODES_SIZE: usize =
+        Option::<ParentNode>::MAX_SIZE * (consts::MAX_GROUP_SIZE - 1);
+    const MAX_LENGTH_HEADER_SIZE: usize =
+        Varint::size(Self::MAX_LEAF_NODES_SIZE + Self::MAX_PARENT_NODES_SIZE);
+
     fn node_iter<'a>(&'a self) -> impl Iterator<Item = Option<Node>> + use<'a> {
         let n_trailing_blanks = self
             .leaf_nodes
