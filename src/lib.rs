@@ -1,4 +1,4 @@
-#![no_std]
+//#![no_std]
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
@@ -8,6 +8,7 @@ pub mod group_state;
 mod io;
 mod key_schedule;
 pub mod protocol;
+pub mod stack;
 pub mod syntax;
 mod transcript_hash;
 mod tree_math;

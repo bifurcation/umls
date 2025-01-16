@@ -6,7 +6,8 @@ edition = "2021"
 [features]
 x25519_aes128gcm_ed25519 = []
 rust_crypto = []
-default = ["x25519_aes128gcm_ed25519", "rust_crypto"]
+stack_measurement = []
+default = ["x25519_aes128gcm_ed25519", "rust_crypto", "stack_measurement"]
 
 # TODO(RLB) Groom dependencies, make most of these optional, conditional on features
 [dependencies]
