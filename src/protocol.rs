@@ -67,7 +67,7 @@ macro_rules! mls_signed {
 
             pub fn new(
                 tbs: $val_owned_type,
-                signature_priv: SignaturePrivateKeyView,
+                signature_priv: &SignaturePrivateKey,
             ) -> Result<$signed_owned_type> {
                 // Serialize the part to be signed
                 let tbs_raw = serialize!($val_owned_type, tbs);
@@ -80,22 +80,20 @@ macro_rules! mls_signed {
                 Ok(group_info)
             }
 
-            pub fn re_sign(&mut self, signature_priv: SignaturePrivateKeyView) -> Result<()> {
+            pub fn re_sign(&mut self, signature_priv: &SignaturePrivateKey) -> Result<()> {
                 let tbs_raw = serialize!($val_owned_type, self.tbs);
                 self.signature =
                     crypto::sign_with_label(&tbs_raw, Self::SIGNATURE_LABEL, signature_priv)?;
                 Ok(())
             }
-        }
 
-        impl<'a> $signed_view_type<'a> {
-            pub fn verify(&self, signature_key: SignaturePublicKeyView) -> Result<()> {
-                let tbs_raw = serialize!($val_owned_type, self.tbs.to_object());
+            pub fn verify(&self, signature_key: &SignaturePublicKey) -> Result<()> {
+                let tbs_raw = serialize!($val_owned_type, self.tbs);
                 crypto::verify_with_label(
                     tbs_raw.as_ref(),
                     $signed_owned_type::SIGNATURE_LABEL,
                     signature_key,
-                    self.signature.clone(),
+                    &self.signature,
                 )
             }
         }
@@ -190,9 +188,7 @@ macro_rules! mls_encrypted {
 
                 Ok(Self(Opaque::from(ct)))
             }
-        }
 
-        impl<'a> $ct_view_type<'a> {
             pub fn open(
                 &self,
                 key: AeadKey,
@@ -225,10 +221,10 @@ macro_rules! mls_hpke_encrypted {
             pub fn seal(
                 rng: &mut impl CryptoRngCore,
                 plaintext: $pt_owned_type,
-                encryption_key: HpkePublicKeyView,
+                encryption_key: &HpkePublicKey,
                 aad: &[u8],
             ) -> Result<Self> {
-                let (kem_output, kem_secret) = crypto::hpke_encap(rng, encryption_key);
+                let (kem_output, kem_secret) = crypto::hpke_encap(rng, &encryption_key);
                 let (key, nonce) = crypto::hpke_key_nonce(kem_secret);
 
                 let ciphertext = $ct_owned_type::seal(plaintext, key, nonce, aad)?;
@@ -238,15 +234,13 @@ macro_rules! mls_hpke_encrypted {
                     ciphertext,
                 })
             }
-        }
 
-        impl<'a> $hpke_view_type<'a> {
             pub fn open(
                 &self,
-                encryption_priv: HpkePrivateKeyView,
+                encryption_priv: &HpkePrivateKey,
                 aad: &[u8],
             ) -> Result<Vec<u8, { $pt_owned_type::MAX_SIZE }>> {
-                let kem_secret = crypto::hpke_decap(encryption_priv, self.kem_output);
+                let kem_secret = crypto::hpke_decap(encryption_priv, &self.kem_output);
                 let (key, nonce) = crypto::hpke_key_nonce(kem_secret);
 
                 self.ciphertext.open(key, nonce, aad)
@@ -780,7 +774,8 @@ impl PrivateMessage {
         let ciphertext = EncryptedPrivateMessageContent::seal(plaintext, key, nonce, &aad)?;
 
         // Encrypt sender data
-        let (key, nonce) = crypto::sender_data_key_nonce(sender_data_secret, ciphertext.as_ref());
+        let (key, nonce) =
+            crypto::sender_data_key_nonce(&sender_data_secret.to_object(), ciphertext.as_ref());
         let aad = serialize!(
             SenderDataAad,
             SenderDataAad {
@@ -821,7 +816,7 @@ impl<'a> PrivateMessageView<'a> {
 
         // Decrypt sender data
         let (key, nonce) =
-            crypto::sender_data_key_nonce(sender_data_secret.as_view(), self.ciphertext.as_ref());
+            crypto::sender_data_key_nonce(sender_data_secret, self.ciphertext.as_ref());
         let aad = serialize!(
             SenderDataAad,
             SenderDataAad {
@@ -831,7 +826,10 @@ impl<'a> PrivateMessageView<'a> {
             }
         );
 
-        let sender_data_data = self.encrypted_sender_data.open(key, nonce, &aad)?;
+        let sender_data_data = self
+            .encrypted_sender_data
+            .to_object()
+            .open(key, nonce, &aad)?;
         let sender_data = SenderDataView::deserialize(&mut sender_data_data.as_slice())?;
 
         // Look up keys for the sender and generation
@@ -852,7 +850,7 @@ impl<'a> PrivateMessageView<'a> {
             }
         );
 
-        let plaintext_data = self.ciphertext.open(key, nonce, &aad)?;
+        let plaintext_data = self.ciphertext.to_object().open(key, nonce, &aad)?;
         let content = PrivateMessageContentView::deserialize(&mut plaintext_data.as_slice())?;
 
         // Construct objects to return
@@ -897,7 +895,7 @@ mod test {
             let rng = &mut rand::thread_rng();
             let (signature_priv, signature_key) = crypto::generate_sig(rng).unwrap();
             let tbs = $tbs_owned_type::default();
-            let signed = $signed_owned_type::new(tbs, signature_priv.as_view()).unwrap();
+            let signed = $signed_owned_type::new(tbs, &signature_priv).unwrap();
 
             let mut storage = make_storage!($signed_owned_type);
             signed.serialize(&mut storage).unwrap();
@@ -905,7 +903,7 @@ mod test {
             let mut reader = storage.as_slice();
             let view = $signed_view_type::deserialize(&mut reader).unwrap();
 
-            view.verify(signature_key.as_view()).unwrap();
+            view.to_object().verify(&signature_key).unwrap();
         };
     }
 

@@ -35,14 +35,14 @@ impl RatchetTreePriv {
         ratchet_tree: &RatchetTree,
         my_index: LeafIndex,
         sender: LeafIndex,
-        path_secret: OptionalPathSecretView,
-        encryption_priv: HpkePrivateKeyView,
+        path_secret: OptionalPathSecret,
+        encryption_priv: HpkePrivateKey,
     ) -> Result<Self> {
         tick!();
         let mut path_secrets = PathSecretList::default();
 
         if let Some(path_secret) = path_secret {
-            let mut path_secret = path_secret.to_object();
+            let mut path_secret = path_secret;
             let path = ratchet_tree.resolve_path(sender);
             path_secrets.resize_default(path.len()).unwrap();
 
@@ -52,12 +52,12 @@ impl RatchetTreePriv {
                 }
 
                 *ps_mut = Some(path_secret.clone());
-                path_secret = crypto::derive_secret(path_secret.as_view().into(), b"path");
+                path_secret = crypto::derive_secret(&path_secret, b"path");
             }
         }
 
         Ok(Self {
-            encryption_priv: encryption_priv.to_object(),
+            encryption_priv: encryption_priv,
             path_secrets,
             commit_secret: Default::default(),
         })
@@ -113,8 +113,8 @@ impl RatchetTreePriv {
             match (path_secret, parent_node) {
                 (Some(_), None) => return false,
                 (Some(path_secret), Some(node)) => {
-                    let node_secret = crypto::derive_secret(path_secret.as_view().into(), b"node");
-                    let (_, priv_key) = crypto::derive_hpke(node_secret.as_view()).unwrap();
+                    let node_secret = crypto::derive_secret(&path_secret, b"node");
+                    let (_, priv_key) = crypto::derive_hpke(&node_secret).unwrap();
 
                     if node.public_key != priv_key {
                         return false;
@@ -373,12 +373,12 @@ impl RatchetTree {
         LeafCount(self.leaf_nodes.len())
     }
 
-    pub fn find(&self, target: LeafNodeView) -> Option<LeafIndex> {
+    pub fn find(&self, target: &LeafNode) -> Option<LeafIndex> {
         tick!();
         let target = Some(target.clone());
         self.leaf_nodes
             .iter()
-            .position(|n| n.as_view() == target)
+            .position(|n| *n == target)
             .map(|i| LeafIndex(i as u32))
     }
 
@@ -532,7 +532,7 @@ impl RatchetTree {
         &mut self,
         rng: &mut (impl CryptoRngCore + Rng),
         from: LeafIndex,
-        signature_priv: SignaturePrivateKeyView,
+        signature_priv: &SignaturePrivateKey,
     ) -> Result<(RatchetTreePriv, UpdatePath)> {
         tick!();
         let path = self.resolve_path(from);
@@ -545,21 +545,21 @@ impl RatchetTree {
                 if res.is_empty() {
                     None
                 } else {
-                    path_secret = crypto::derive_secret(path_secret.as_view(), b"path");
+                    path_secret = crypto::derive_secret(&path_secret, b"path");
                     Some(path_secret.clone())
                 }
             })
             .collect();
 
-        let commit_secret = crypto::derive_secret(path_secret.as_view(), b"path");
+        let commit_secret = crypto::derive_secret(&path_secret, b"path");
 
         // Compute the corresponding public keys
         let nodes: Result<UpdatePathNodeList> = path_secrets
             .iter()
             .filter_map(|ps| ps.as_ref())
             .map(|ps| {
-                let node_secret = crypto::derive_secret(ps.as_view(), b"node");
-                let (_, encryption_key) = crypto::derive_hpke(node_secret.as_view())?;
+                let node_secret = crypto::derive_secret(ps, b"node");
+                let (_, encryption_key) = crypto::derive_hpke(&node_secret)?;
                 Ok(UpdatePathNode {
                     encryption_key,
                     encrypted_path_secret: Default::default(),
@@ -628,11 +628,11 @@ impl RatchetTree {
         for ((ps, res), enc) in filtered_priv.zip(resolutions).zip(encrypted_path_secret) {
             let raw_path_secret = Raw::try_from(ps.as_ref())?;
             for n in res.iter() {
-                let encryption_key = self.encryption_key_at(*n).unwrap().as_view();
+                let encryption_key = self.encryption_key_at(*n).unwrap();
                 let encrypted_path_secret = EncryptedPathSecret::seal(
                     rng,
                     raw_path_secret.clone(),
-                    encryption_key,
+                    &encryption_key,
                     &group_context,
                 )?;
 
@@ -660,7 +660,7 @@ impl RatchetTree {
     pub fn decap(
         &mut self,
         ratchet_tree_priv: &mut RatchetTreePriv,
-        update_path: UpdatePathView,
+        update_path: &UpdatePath,
         from: LeafIndex,
         to: LeafIndex,
         group_context: &GroupContext,
@@ -701,25 +701,23 @@ impl RatchetTree {
             .rev()
             .find(|ps| ps.is_some())
             .map(|ps| {
-                let decrypt_node_secret =
-                    crypto::derive_secret(ps.as_ref().unwrap().as_view().into(), b"node");
-                let (encryption_priv, encryption_key) =
-                    crypto::derive_hpke(decrypt_node_secret.as_view())?;
+                let decrypt_node_secret = crypto::derive_secret(ps.as_ref().unwrap(), b"node");
+                let (encryption_priv, encryption_key) = crypto::derive_hpke(&decrypt_node_secret)?;
 
                 Ok(encryption_priv)
             })
             .transpose()?;
 
-        let encryption_priv_view = if let Some(encryption_priv) = path_encryption_priv.as_ref() {
-            encryption_priv.as_view()
+        let encryption_priv = if let Some(encryption_priv) = path_encryption_priv.as_ref() {
+            encryption_priv
         } else {
-            ratchet_tree_priv.encryption_priv.as_view()
+            &ratchet_tree_priv.encryption_priv
         };
 
         // Decrypt the path secret
         let encrypted_path_secret =
             update_path.nodes[update_path_index].encrypted_path_secret[res_index].clone();
-        let raw_path_secret = encrypted_path_secret.open(encryption_priv_view, &group_context)?;
+        let raw_path_secret = encrypted_path_secret.open(encryption_priv, &group_context)?;
         let mut path_secret = HashOutput(Opaque::from(raw_path_secret));
 
         // Grow / shrink the path to accommodate changes in the size of the tree
@@ -738,11 +736,11 @@ impl RatchetTree {
                 continue;
             }
 
-            path_secret = crypto::derive_secret(path_secret.as_view(), b"path");
+            path_secret = crypto::derive_secret(&path_secret, b"path");
             ratchet_tree_priv.path_secrets[i] = Some(path_secret.clone());
         }
 
-        ratchet_tree_priv.commit_secret = crypto::derive_secret(path_secret.as_view(), b"path");
+        ratchet_tree_priv.commit_secret = crypto::derive_secret(&path_secret, b"path");
 
         Ok(())
     }

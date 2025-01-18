@@ -5,10 +5,11 @@ use crate::protocol::*;
 use crate::stack::*;
 use crate::syntax::*;
 use crate::tree_math::*;
-use crate::{make_storage, mls_newtype_opaque, serialize, stack_ptr, tick};
+use crate::{make_storage, serialize, stack_ptr, tick};
 
-use core::ops::{Deref, DerefMut};
 use heapless::Vec;
+use rand::Rng;
+use rand_core::CryptoRngCore;
 
 /*
                     epoch_secret[n-1]
@@ -66,49 +67,89 @@ member + gc --> epoch
 
 */
 
-mls_newtype_opaque! { EpochSecret + EpochSecretView, crypto::consts::HASH_OUTPUT_SIZE }
-mls_newtype_opaque! { JoinerSecret + JoinerSecretView, crypto::consts::HASH_OUTPUT_SIZE }
-mls_newtype_opaque! { MemberSecret + MemberSecretView, crypto::consts::HASH_OUTPUT_SIZE }
-mls_newtype_opaque! { WelcomeSecret + WelcomeSecretView, crypto::consts::HASH_OUTPUT_SIZE }
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct EpochSecret(HashOutput);
 
-macro_rules! to_from_hash_output {
-    ($owned_type:ident + $view_type:ident) => {
-        impl From<$owned_type> for HashOutput {
-            fn from(val: $owned_type) -> Self {
-                tick!();
-                Self::from(val.0)
-            }
-        }
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct JoinerSecret(HashOutput);
 
-        impl From<HashOutput> for $owned_type {
-            fn from(val: HashOutput) -> Self {
-                tick!();
-                Self::from(Opaque::from(val))
-            }
-        }
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct MemberSecret(HashOutput);
 
-        impl<'a> From<$view_type<'a>> for HashOutputView<'a> {
-            fn from(val: $view_type<'a>) -> Self {
-                tick!();
-                Self::from(val.0)
-            }
-        }
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct WelcomeSecret(HashOutput);
 
-        impl<'a> From<HashOutputView<'a>> for $view_type<'a> {
-            fn from(val: HashOutputView<'a>) -> Self {
-                tick!();
-                Self::from(OpaqueView::from(val))
-            }
-        }
-    };
+#[derive(Clone, PartialEq, Debug)]
+pub struct EpochSecretView<'a>(HashOutputView<'a>);
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct JoinerSecretView<'a>(HashOutputView<'a>);
+
+impl Serialize for EpochSecret {
+    const MAX_SIZE: usize = HashOutput::MAX_SIZE;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        self.0.serialize(writer)
+    }
 }
 
-to_from_hash_output! { EpochSecret + EpochSecretView }
-to_from_hash_output! { JoinerSecret + JoinerSecretView }
-to_from_hash_output! { MemberSecret + MemberSecretView }
-to_from_hash_output! { WelcomeSecret + WelcomeSecretView }
+impl AsView for EpochSecret {
+    type View<'a> = EpochSecretView<'a>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        EpochSecretView(self.0.as_view())
+    }
+}
+
+impl<'a> Deserialize<'a> for EpochSecretView<'a> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        Ok(Self(HashOutputView::deserialize(reader)?))
+    }
+}
+
+impl<'a> ToObject for EpochSecretView<'a> {
+    type Object = EpochSecret;
+
+    fn to_object(&self) -> Self::Object {
+        EpochSecret(self.0.to_object())
+    }
+}
+
+impl Serialize for JoinerSecret {
+    const MAX_SIZE: usize = HashOutput::MAX_SIZE;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        self.0.serialize(writer)
+    }
+}
+
+impl AsView for JoinerSecret {
+    type View<'a> = JoinerSecretView<'a>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a> {
+        JoinerSecretView(self.0.as_view())
+    }
+}
+
+impl<'a> Deserialize<'a> for JoinerSecretView<'a> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        Ok(Self(HashOutputView::deserialize(reader)?))
+    }
+}
+
+impl<'a> ToObject for JoinerSecretView<'a> {
+    type Object = JoinerSecret;
+
+    fn to_object(&self) -> Self::Object {
+        JoinerSecret(self.0.to_object())
+    }
+}
 
 impl EpochSecret {
+    pub fn new(rng: &mut (impl Rng + CryptoRngCore)) -> Self {
+        Self(HashOutput(Opaque::random(rng)))
+    }
+
     pub fn advance(
         &mut self,
         commit_secret: &HashOutput,
@@ -118,7 +159,7 @@ impl EpochSecret {
         let group_context = serialize!(GroupContext, group_context);
 
         let joiner_secret = JoinerSecret::new(&self, commit_secret, &group_context);
-        let member_secret = joiner_secret.as_view().advance();
+        let member_secret = joiner_secret.advance();
         let (welcome_key, welcome_nonce) = member_secret.welcome_key_nonce();
         *self = member_secret.advance(&group_context);
 
@@ -127,7 +168,7 @@ impl EpochSecret {
 
     pub fn confirmation_tag(&self, confirmed_transcript_hash: &HashOutput) -> HashOutput {
         tick!();
-        let confirmation_key = crypto::derive_secret(self.as_view().into(), b"confirm");
+        let confirmation_key = crypto::derive_secret(&self.0, b"confirm");
 
         crypto::hmac(
             confirmation_key.as_ref(),
@@ -137,12 +178,12 @@ impl EpochSecret {
 
     pub fn epoch_authenticator(&self) -> HashOutput {
         tick!();
-        crypto::derive_secret(self.as_view().into(), b"authentication")
+        crypto::derive_secret(&self.0, b"authentication")
     }
 
     pub fn sender_data_secret(&self) -> HashOutput {
         tick!();
-        crypto::derive_secret(self.as_view().into(), b"sender data")
+        crypto::derive_secret(&self.0, b"sender data")
     }
 
     // XXX(RLB) This can be done immutably because we only ever derive one secret per epoch
@@ -153,7 +194,7 @@ impl EpochSecret {
     ) -> (u32, AeadKey, AeadNonce) {
         tick!();
         let mut parent = group_size.root();
-        let mut tree_secret = crypto::derive_secret(self.as_view().into(), b"encryption");
+        let mut tree_secret = crypto::derive_secret(&self.0, b"encryption");
 
         loop {
             let Some(next) = parent.dirpath_child(index) else {
@@ -162,13 +203,13 @@ impl EpochSecret {
 
             let label: &'static [u8] = if next < parent { b"left" } else { b"right" };
             parent = next;
-            tree_secret = crypto::expand_with_label(tree_secret.as_view(), b"tree", label);
+            tree_secret = crypto::expand_with_label(&tree_secret, b"tree", label);
         }
 
-        let handshake_secret = crypto::expand_with_label(tree_secret.as_view(), b"handshake", &[]);
+        let handshake_secret = crypto::expand_with_label(&tree_secret, b"handshake", &[]);
 
         let generation = 0;
-        let (key, nonce) = crypto::tree_key_nonce(handshake_secret.as_view(), generation);
+        let (key, nonce) = crypto::tree_key_nonce(&handshake_secret, generation);
         (generation, key, nonce)
     }
 }
@@ -180,30 +221,31 @@ impl JoinerSecret {
         group_context: &[u8],
     ) -> Self {
         tick!();
-        let init_secret = crypto::derive_secret(epoch_secret.as_view().into(), b"init");
-        let pre_joiner_secret =
-            crypto::extract(init_secret.as_view().into(), commit_secret.as_view());
-        crypto::expand_with_label(pre_joiner_secret.as_view(), b"joiner", &group_context).into()
+        let init_secret = crypto::derive_secret(&epoch_secret.0, b"init");
+        let pre_joiner_secret = crypto::extract(&init_secret, &commit_secret);
+        Self(crypto::expand_with_label(
+            &pre_joiner_secret,
+            b"joiner",
+            &group_context,
+        ))
     }
-}
 
-impl<'a> JoinerSecretView<'a> {
-    pub fn advance(self) -> MemberSecret {
+    pub fn advance(&self) -> MemberSecret {
         tick!();
         let psk_secret = HashOutput(Opaque::zero());
-        crypto::extract(self.into(), psk_secret.as_view()).into()
+        MemberSecret(crypto::extract(&self.0, &psk_secret))
     }
 }
 
 impl MemberSecret {
     pub fn welcome_key_nonce(&self) -> (AeadKey, AeadNonce) {
         tick!();
-        let welcome_secret = crypto::derive_secret(self.as_view().into(), b"welcome");
-        crypto::welcome_key_nonce(welcome_secret.as_view())
+        let welcome_secret = crypto::derive_secret(&self.0, b"welcome");
+        crypto::welcome_key_nonce(&welcome_secret)
     }
 
     pub fn advance(&self, group_context: &[u8]) -> EpochSecret {
         tick!();
-        crypto::expand_with_label(self.as_view().into(), b"epoch", &group_context).into()
+        EpochSecret(crypto::expand_with_label(&self.0, b"epoch", &group_context))
     }
 }

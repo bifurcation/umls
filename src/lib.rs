@@ -1,4 +1,4 @@
-//#![no_std]
+#![no_std]
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
@@ -58,7 +58,7 @@ pub fn make_key_package(
         extensions: Default::default(),
     };
 
-    let leaf_node = LeafNode::new(leaf_node_tbs, signature_priv.as_view())?;
+    let leaf_node = LeafNode::new(leaf_node_tbs, &signature_priv)?;
 
     // Form the key package
     let key_package_tbs = KeyPackageTbs {
@@ -69,7 +69,7 @@ pub fn make_key_package(
         extensions: Default::default(),
     };
 
-    let key_package = KeyPackage::new(key_package_tbs, signature_priv.as_view())?;
+    let key_package = KeyPackage::new(key_package_tbs, &signature_priv)?;
 
     // Form the private state
     let key_package_priv = KeyPackagePriv {
@@ -124,7 +124,7 @@ impl MlsGroup for GroupState {
         ratchet_tree.add_leaf(key_package.tbs.leaf_node)?;
 
         // Generate a fresh epoch secret
-        let epoch_secret = EpochSecret::from(Opaque::random(rng));
+        let epoch_secret = EpochSecret::new(rng);
 
         // Set the group context
         let group_context = GroupContext {
@@ -174,8 +174,7 @@ impl MlsGroup for GroupState {
         // Decrypt the Group Secrets
         let group_secrets_data = welcome.secrets[0]
             .encrypted_group_secrets
-            .as_view()
-            .open(key_package_priv.init_priv.as_view(), &[])?;
+            .open(&key_package_priv.init_priv, &[])?;
         let group_secrets = GroupSecretsView::deserialize(&mut group_secrets_data.as_slice())?;
 
         if !group_secrets.psks.is_empty() {
@@ -183,14 +182,12 @@ impl MlsGroup for GroupState {
         }
 
         // Decrypt the GroupInfo
-        let member_secret = group_secrets.joiner_secret.advance();
+        let member_secret = group_secrets.joiner_secret.to_object().advance();
         let (welcome_key, welcome_nonce) = member_secret.welcome_key_nonce();
 
-        let group_info_data =
-            welcome
-                .encrypted_group_info
-                .as_view()
-                .open(welcome_key, welcome_nonce, &[])?;
+        let group_info_data = welcome
+            .encrypted_group_info
+            .open(welcome_key, welcome_nonce, &[])?;
         let group_info = GroupInfoView::deserialize(&mut group_info_data.as_slice())?;
 
         // Extract the ratchet tree from an extension
@@ -213,7 +210,7 @@ impl MlsGroup for GroupState {
         }
 
         // Find our own leaf in the ratchet tree
-        let Some(my_index) = ratchet_tree.find(key_package.leaf_node.as_view()) else {
+        let Some(my_index) = ratchet_tree.find(&key_package.leaf_node) else {
             return Err(Error("Joiner not present in tree"));
         };
 
@@ -225,7 +222,7 @@ impl MlsGroup for GroupState {
                 return Err(Error("GroupInfo signer not present in tree"));
             };
 
-            group_info.verify(signer_leaf.signature_key.as_view())?;
+            group_info.to_object().verify(&signer_leaf.signature_key)?;
         }
 
         // Update the key schedule
@@ -243,8 +240,8 @@ impl MlsGroup for GroupState {
             &ratchet_tree,
             my_index,
             sender,
-            group_secrets.path_secret,
-            key_package_priv.encryption_priv.as_view(),
+            group_secrets.path_secret.to_object(),
+            key_package_priv.encryption_priv,
         )?;
 
         assert!(my_ratchet_tree_priv.consistent(&ratchet_tree, my_index));
@@ -277,9 +274,9 @@ impl MlsGroup for GroupState {
         let (proposal, joiner_location) = match operation {
             Operation::Add(key_package) => {
                 // Verify the KeyPackage and the LeafNode
-                let signature_key = key_package.tbs.leaf_node.tbs.signature_key.as_view();
-                key_package.as_view().verify(signature_key)?;
-                key_package.tbs.leaf_node.as_view().verify(signature_key)?;
+                let signature_key = &key_package.tbs.leaf_node.tbs.signature_key;
+                key_package.verify(signature_key)?;
+                key_package.tbs.leaf_node.verify(signature_key)?;
 
                 // Add the joiner to the tree
                 let joiner_location = self.ratchet_tree.add_leaf(key_package.leaf_node.clone())?;
@@ -300,11 +297,9 @@ impl MlsGroup for GroupState {
         };
 
         // Update the committer's direct path
-        let (ratchet_tree_priv, update_path) = self.ratchet_tree.update_direct_path(
-            rng,
-            self.my_index,
-            self.my_signature_priv.as_view(),
-        )?;
+        let (ratchet_tree_priv, update_path) =
+            self.ratchet_tree
+                .update_direct_path(rng, self.my_index, &self.my_signature_priv)?;
 
         self.my_ratchet_tree_priv = ratchet_tree_priv;
 
@@ -351,7 +346,7 @@ impl MlsGroup for GroupState {
         };
 
         let signed_framed_content =
-            SignedFramedContent::new(framed_content_tbs, self.my_signature_priv.as_view())?;
+            SignedFramedContent::new(framed_content_tbs, &self.my_signature_priv)?;
 
         // Update the confirmed transcript hash
         self.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
@@ -408,12 +403,8 @@ impl MlsGroup for GroupState {
                 psks: Default::default(),
             };
 
-            let encrypted_group_secrets = HpkeEncryptedGroupSecrets::seal(
-                rng,
-                group_secrets,
-                key_package.init_key.as_view(),
-                &[],
-            )?;
+            let encrypted_group_secrets =
+                HpkeEncryptedGroupSecrets::seal(rng, group_secrets, &key_package.init_key, &[])?;
             let new_member = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", key_package)?;
             let encrypted_group_secrets = EncryptedGroupSecrets {
                 new_member,
@@ -432,11 +423,11 @@ impl MlsGroup for GroupState {
             let group_info_tbs = GroupInfoTbs {
                 group_context: self.group_context.clone(),
                 extensions: group_info_extensions,
-                confirmation_tag: confirmation_tag.clone(),
+                confirmation_tag: confirmation_tag,
                 signer: self.my_index,
             };
 
-            let group_info = GroupInfo::new(group_info_tbs, self.my_signature_priv.as_view())?;
+            let group_info = GroupInfo::new(group_info_tbs, &self.my_signature_priv)?;
             let encrypted_group_info =
                 EncryptedGroupInfo::seal(group_info, welcome_key, welcome_nonce, &[])?;
 
@@ -468,9 +459,7 @@ impl MlsGroup for GroupState {
                 return Err(Error("Commit signer not present in tree"));
             };
 
-            signed_framed_content
-                .as_view()
-                .verify(signer_leaf.signature_key.as_view())?;
+            signed_framed_content.verify(&signer_leaf.signature_key)?;
         }
 
         // Unwrap the Commit and apply it to the ratchet tree
@@ -516,7 +505,7 @@ impl MlsGroup for GroupState {
 
         self.ratchet_tree.decap(
             &mut self.my_ratchet_tree_priv,
-            update_path.as_view(),
+            &update_path,
             sender,
             self.my_index,
             &self.group_context,

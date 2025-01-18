@@ -185,12 +185,12 @@ pub fn hash_ref(label: &'static [u8], value: &impl Serialize) -> Result<HashOutp
     Ok(h.finalize())
 }
 
-pub fn extract(salt: HashOutputView, ikm: HashOutputView) -> HashOutput {
+pub fn extract(salt: &HashOutput, ikm: &HashOutput) -> HashOutput {
     hmac(salt.as_ref(), ikm.as_ref())
 }
 
 fn expand_with_label_full(
-    prk: HashOutputView,
+    prk: &HashOutput,
     label: &'static [u8],
     context: &[u8],
     len: u16,
@@ -220,19 +220,15 @@ fn expand_with_label_full(
     out
 }
 
-pub fn expand_with_label(
-    secret: HashOutputView,
-    label: &'static [u8],
-    context: &[u8],
-) -> HashOutput {
+pub fn expand_with_label(secret: &HashOutput, label: &'static [u8], context: &[u8]) -> HashOutput {
     expand_with_label_full(secret, label, context, consts::HASH_OUTPUT_SIZE as u16)
 }
 
-pub fn derive_secret(secret: HashOutputView, label: &'static [u8]) -> HashOutput {
+pub fn derive_secret(secret: &HashOutput, label: &'static [u8]) -> HashOutput {
     expand_with_label(secret, label, &[])
 }
 
-pub fn tree_key_nonce(secret: HashOutputView, generation: u32) -> (AeadKey, AeadNonce) {
+pub fn tree_key_nonce(secret: &HashOutput, generation: u32) -> (AeadKey, AeadNonce) {
     let generation = generation.to_be_bytes();
     let key_data = expand_with_label_full(
         secret,
@@ -253,7 +249,7 @@ pub fn tree_key_nonce(secret: HashOutputView, generation: u32) -> (AeadKey, Aead
     (key, nonce)
 }
 
-pub fn welcome_key_nonce(secret: HashOutputView) -> (AeadKey, AeadNonce) {
+pub fn welcome_key_nonce(secret: &HashOutput) -> (AeadKey, AeadNonce) {
     let key_data = expand_with_label_full(secret, b"key", &[], consts::AEAD_KEY_SIZE as u16);
     let nonce_data = expand_with_label_full(secret, b"nonce", &[], consts::AEAD_NONCE_SIZE as u16);
 
@@ -263,7 +259,7 @@ pub fn welcome_key_nonce(secret: HashOutputView) -> (AeadKey, AeadNonce) {
     (key, nonce)
 }
 
-pub fn sender_data_key_nonce(secret: HashOutputView, ciphertext: &[u8]) -> (AeadKey, AeadNonce) {
+pub fn sender_data_key_nonce(secret: &HashOutput, ciphertext: &[u8]) -> (AeadKey, AeadNonce) {
     let ciphertext_sample = &ciphertext[..consts::HASH_OUTPUT_SIZE];
 
     let key_data = expand_with_label_full(
@@ -315,7 +311,7 @@ fn signature_digest(message: &[u8], label: &[u8]) -> Result<HashOutput> {
 pub fn sign_with_label(
     message: &[u8],
     label: &[u8],
-    signature_priv: SignaturePrivateKeyView,
+    signature_priv: &SignaturePrivateKey,
 ) -> Result<Signature> {
     let priv_bytes = signature_priv.as_ref().try_into().unwrap();
     let raw_priv = SigningKey::from_keypair_bytes(priv_bytes).unwrap();
@@ -330,8 +326,8 @@ pub fn sign_with_label(
 pub fn verify_with_label(
     message: &[u8],
     label: &[u8],
-    signature_key: SignaturePublicKeyView,
-    signature: SignatureView,
+    signature_key: &SignaturePublicKey,
+    signature: &Signature,
 ) -> Result<()> {
     let key_bytes = signature_key.as_ref().try_into().unwrap();
     let sig_bytes = signature.as_ref();
@@ -354,7 +350,7 @@ pub fn generate_hpke(rng: &mut impl CryptoRngCore) -> Result<(HpkePrivateKey, Hp
     Ok((hpke_priv, hpke_key))
 }
 
-pub fn derive_hpke(seed: HashOutputView) -> Result<(HpkePrivateKey, HpkePublicKey)> {
+pub fn derive_hpke(seed: &HashOutput) -> Result<(HpkePrivateKey, HpkePublicKey)> {
     let priv_bytes: &[u8; 32] = seed
         .as_ref()
         .try_into()
@@ -476,7 +472,7 @@ mod hpke {
 
 pub fn hpke_encap(
     rng: &mut impl CryptoRngCore,
-    encryption_key: HpkePublicKeyView,
+    encryption_key: &HpkePublicKey,
 ) -> (HpkeKemOutput, HpkeKemSecret) {
     let pk_r_m: [u8; 32] = encryption_key.as_ref().try_into().unwrap();
     let pk_r = PublicKey::from(pk_r_m);
@@ -497,10 +493,7 @@ pub fn hpke_encap(
     (enc, shared_secret)
 }
 
-pub fn hpke_decap(
-    encryption_priv: HpkePrivateKeyView,
-    kem_output: HpkeKemOutputView,
-) -> HpkeKemSecret {
+pub fn hpke_decap(encryption_priv: &HpkePrivateKey, kem_output: &HpkeKemOutput) -> HpkeKemSecret {
     let sk_r_m: [u8; 32] = encryption_priv.as_ref().try_into().unwrap();
     let sk_r = StaticSecret::from(sk_r_m);
     let pk_r = PublicKey::from(&sk_r);
