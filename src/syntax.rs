@@ -85,6 +85,13 @@ impl Serialize for Nil {
     }
 }
 
+impl<'a> Deserialize<'a> for Nil {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        tick!();
+        Ok(Nil)
+    }
+}
+
 impl<'a> Deserialize<'a> for NilView<'a> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
         tick!();
@@ -192,6 +199,13 @@ macro_rules! mls_newtype_primitive {
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
                 tick!();
                 self.0.serialize(writer)
+            }
+        }
+
+        impl<'a> Deserialize<'a> for $owned_type {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                tick!();
+                Ok(Self::from(<$int>::deserialize(reader)?))
             }
         }
 
@@ -457,16 +471,11 @@ impl<const N: usize> Serialize for Raw<N> {
     }
 }
 
-impl<'a, const N: usize> Serialize for RawView<'a, N> {
-    const MAX_SIZE: usize = N;
-
-    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+impl<'a, const N: usize> Deserialize<'a> for Raw<N> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
         tick!();
-        if self.0.len() != N {
-            return Err(Error("Invalid object"));
-        }
-
-        writer.write(self.0)
+        let content = reader.read_ref(N)?;
+        Self::try_from(content)
     }
 }
 
@@ -568,13 +577,12 @@ impl<const N: usize> Serialize for Opaque<N> {
     }
 }
 
-impl<'a, const N: usize> Serialize for OpaqueView<'a, N> {
-    const MAX_SIZE: usize = Varint::size(N) + N;
-
-    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+impl<'a, const N: usize> Deserialize<'a> for Opaque<N> {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
         tick!();
-        Varint(self.0.len()).serialize(writer)?;
-        writer.write(self.0)
+        let len = Varint::deserialize(reader)?;
+        let content = reader.read_ref(len.0)?;
+        Self::try_from(content)
     }
 }
 
@@ -698,12 +706,10 @@ macro_rules! mls_newtype_opaque {
             }
         }
 
-        impl<'a> Serialize for $view_type<'a> {
-            const MAX_SIZE: usize = Opaque::<{ $size }>::MAX_SIZE;
-
-            fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        impl<'a> Deserialize<'a> for $owned_type {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
                 tick!();
-                self.0.serialize(writer)
+                Ok(Self(Opaque::deserialize(reader)?))
             }
         }
 
@@ -792,9 +798,18 @@ macro_rules! mls_struct {
             $(pub $field_name: $field_view_type<'a>,)*
         }
 
+        impl<'a> Deserialize<'a> for $owned_type {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                tick!();
+                Ok(Self{
+                    $($field_name: $field_type::deserialize(reader)?,)*
+                })
+            }
+        }
+
         impl<'a> Deserialize<'a> for $view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-tick!();
+                tick!();
                 Ok(Self{
                     $($field_name: $field_view_type::deserialize(reader)?,)*
                 })
@@ -841,7 +856,7 @@ macro_rules! mls_enum {
             const MAX_SIZE: usize = $disc_type::MAX_SIZE + max(&[$($variant_type::MAX_SIZE, )*]);
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
-tick!();
+                tick!();
                 match self {
                     $(
                     Self::$variant_name(x) => {
@@ -853,9 +868,20 @@ tick!();
             }
         }
 
+        impl<'a> Deserialize<'a> for $owned_type {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                tick!();
+                let disc = $disc_type::deserialize(reader)?;
+                match disc {
+                    $($variant_disc => Ok(Self::$variant_name($variant_type::deserialize(reader)?)),)*
+                    _ => Err(Error("Invalid encoding")),
+                }
+            }
+        }
+
         impl<'a> Deserialize<'a> for $view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-tick!();
+                tick!();
                 let disc = $disc_type::deserialize(reader)?;
                 match disc {
                     $($variant_disc => Ok(Self::$variant_name($variant_view_type::deserialize(reader)?)),)*
@@ -878,7 +904,7 @@ tick!();
             type Object = $owned_type;
 
             fn to_object(&self) -> Self::Object {
-tick!();
+                tick!();
                 match self {
                     $(Self::$variant_name(x) => Self::Object::$variant_name(x.to_object()),)*
                 }

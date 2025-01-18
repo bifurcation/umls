@@ -144,6 +144,15 @@ macro_rules! mls_signed {
             }
         }
 
+        impl<'a> Deserialize<'a> for $signed_owned_type {
+            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                let tbs = $val_owned_type::deserialize(reader)?;
+                let signature = Signature::deserialize(reader)?;
+
+                Ok(Self { tbs, signature })
+            }
+        }
+
         impl<'a> Deserialize<'a> for $signed_view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
                 tick!();
@@ -707,7 +716,7 @@ mls_newtype_primitive! { Generation + GenerationView => u32 }
 mls_newtype_primitive! { ReuseGuard + ReuseGuardView => u32 }
 
 struct SenderDataAad<'a> {
-    group_id: GroupIdView<'a>,
+    group_id: &'a GroupId,
     epoch: Epoch,
     content_type: ContentType,
 }
@@ -738,10 +747,10 @@ mls_encrypted! {
 }
 
 struct PrivateMessageContentAad<'a> {
-    group_id: GroupIdView<'a>,
+    group_id: &'a GroupId,
     epoch: Epoch,
     content_type: ContentType,
-    authenticated_data: PrivateMessageAadView<'a>,
+    authenticated_data: &'a PrivateMessageAad,
 }
 
 impl<'a> Serialize for PrivateMessageContentAad<'a> {
@@ -818,10 +827,10 @@ impl PrivateMessage {
         let aad = serialize!(
             PrivateMessageContentAad,
             PrivateMessageContentAad {
-                group_id: group_id.as_view(),
+                group_id: &group_id,
                 epoch,
                 content_type: CONTENT_TYPE_COMMIT,
-                authenticated_data: authenticated_data.as_view(),
+                authenticated_data: &authenticated_data,
             }
         );
 
@@ -833,7 +842,7 @@ impl PrivateMessage {
         let aad = serialize!(
             SenderDataAad,
             SenderDataAad {
-                group_id: group_id.as_view(),
+                group_id: &group_id,
                 epoch,
                 content_type: CONTENT_TYPE_COMMIT,
             }
@@ -850,11 +859,9 @@ impl PrivateMessage {
             ciphertext,
         })
     }
-}
 
-impl<'a> PrivateMessageView<'a> {
     pub fn open(
-        &self,
+        self,
         sender_data_secret: &HashOutput,
         sender_key_source: &impl SenderKeySource,
         group_context: &GroupContext,
@@ -862,11 +869,11 @@ impl<'a> PrivateMessageView<'a> {
         tick!();
 
         // Check outer properties are correct
-        if self.group_id != group_context.group_id.as_view() {
+        if self.group_id != group_context.group_id {
             return Err(Error("Wrong group"));
         }
 
-        if self.epoch != group_context.epoch.as_view() {
+        if self.epoch != group_context.epoch {
             return Err(Error("Wrong epoch"));
         }
 
@@ -876,21 +883,20 @@ impl<'a> PrivateMessageView<'a> {
         let aad = serialize!(
             SenderDataAad,
             SenderDataAad {
-                group_id: self.group_id,
-                epoch: self.epoch.to_object(),
+                group_id: &self.group_id,
+                epoch: self.epoch,
                 content_type: CONTENT_TYPE_COMMIT,
             }
         );
 
-        let sender_data_data = self
-            .encrypted_sender_data
-            .to_object()
-            .open(key, nonce, &aad)?;
-        let sender_data = SenderDataView::deserialize(&mut sender_data_data.as_slice())?;
+        let sender_data_data = self.encrypted_sender_data.open(key, nonce, &aad)?;
+        let SenderData {
+            leaf_index,
+            generation,
+            reuse_guard, // TODO(RLB) Actually apply the reuse guard
+        } = SenderData::deserialize(&mut sender_data_data.as_slice())?;
 
         // Look up keys for the sender and generation
-        let leaf_index = sender_data.leaf_index.to_object();
-        let generation = sender_data.generation.to_object();
         let (key, nonce) = sender_key_source
             .find_keys(leaf_index, generation)
             .ok_or(Error("Unknown sender"))?;
@@ -899,35 +905,35 @@ impl<'a> PrivateMessageView<'a> {
         let aad = serialize!(
             PrivateMessageContentAad,
             PrivateMessageContentAad {
-                group_id: self.group_id,
-                epoch: self.epoch.to_object(),
+                group_id: &self.group_id,
+                epoch: self.epoch,
                 content_type: CONTENT_TYPE_COMMIT,
-                authenticated_data: self.authenticated_data,
+                authenticated_data: &self.authenticated_data,
             }
         );
 
-        let plaintext_data = self.ciphertext.to_object().open(key, nonce, &aad)?;
-        let content = PrivateMessageContentView::deserialize(&mut plaintext_data.as_slice())?;
+        let plaintext_data = self.ciphertext.open(key, nonce, &aad)?;
+        let content = PrivateMessageContent::deserialize(&mut plaintext_data.as_slice())?;
 
         // Construct objects to return
         let tbs = FramedContentTbs {
             version: consts::SUPPORTED_VERSION,
             wire_format: consts::SUPPORTED_WIRE_FORMAT,
             content: FramedContent {
-                group_id: self.group_id.to_object(),
-                epoch: self.epoch.to_object(),
+                group_id: self.group_id,
+                epoch: self.epoch,
                 sender: Sender::Member(leaf_index),
-                authenticated_data: self.authenticated_data.to_object(),
-                content: MessageContent::Commit(content.commit.to_object()),
+                authenticated_data: self.authenticated_data,
+                content: MessageContent::Commit(content.commit),
             },
             binder: FramedContentBinder::Member(group_context.clone()),
         };
 
         let signed_framed_content = SignedFramedContent {
             tbs,
-            signature: content.signature.to_object(),
+            signature: content.signature,
         };
-        let confirmation_tag = content.confirmation_tag.to_object();
+        let confirmation_tag = content.confirmation_tag;
 
         Ok((signed_framed_content, confirmation_tag))
     }

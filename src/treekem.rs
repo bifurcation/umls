@@ -224,6 +224,45 @@ impl Serialize for RatchetTree {
     }
 }
 
+impl<'a> Deserialize<'a> for RatchetTree {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        tick!();
+        let len = Varint::deserialize(reader)?;
+
+        let mut content = reader.take(len.0)?;
+        let mut leaf_nodes = Vec::new();
+        let mut parent_nodes = Vec::new();
+        let mut leaf = true;
+        while !content.is_empty() {
+            let node = Option::<Node>::deserialize(&mut content)?;
+            match node {
+                Some(Node::Leaf(node)) if leaf => leaf_nodes.push(Some(node)).unwrap(),
+                None if leaf => leaf_nodes.push(None).unwrap(),
+                Some(Node::Parent(node)) if !leaf => parent_nodes.push(Some(node)).unwrap(),
+                None if !leaf => parent_nodes.push(None).unwrap(),
+                _ => return Err(Error("Malformed ratchet tree")),
+            }
+
+            leaf = !leaf;
+        }
+
+        if parent_nodes.len() != leaf_nodes.len() - 1 {
+            return Err(Error("Malformed ratchet tree"));
+        }
+
+        // Pad leaf count to a power of two
+        while leaf_nodes.len().count_ones() > 1 {
+            leaf_nodes.push(None).unwrap();
+            parent_nodes.push(None).unwrap();
+        }
+
+        Ok(Self {
+            leaf_nodes,
+            parent_nodes,
+        })
+    }
+}
+
 impl<'a> Deserialize<'a> for RatchetTreeView<'a> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
         tick!();

@@ -93,6 +93,12 @@ impl Serialize for EpochSecret {
     }
 }
 
+impl<'a> Deserialize<'a> for EpochSecret {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        Ok(Self(HashOutput::deserialize(reader)?))
+    }
+}
+
 impl AsView for EpochSecret {
     type View<'a> = EpochSecretView<'a>;
 
@@ -120,6 +126,12 @@ impl Serialize for JoinerSecret {
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
         self.0.serialize(writer)
+    }
+}
+
+impl<'a> Deserialize<'a> for JoinerSecret {
+    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        Ok(Self(HashOutput::deserialize(reader)?))
     }
 }
 

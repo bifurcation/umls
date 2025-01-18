@@ -57,7 +57,7 @@ fn main() {
             stack_usage(|| GroupState::join(kp_priv, kp, &welcome_2.unwrap()).unwrap());
 
         // Other member handles the commit
-        let ((), handle_commit_2_stack) = stack_usage(|| state_a.handle_commit(&commit_2).unwrap());
+        let ((), handle_commit_2_stack) = stack_usage(|| state_a.handle_commit(commit_2).unwrap());
 
         println!("===");
         println!("make_key_package_2: {:8}", make_key_package_2_stack);

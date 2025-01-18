@@ -107,7 +107,7 @@ pub trait MlsGroup: Sized {
         operation: Operation,
     ) -> Result<(PrivateMessage, Option<Welcome>)>;
 
-    fn handle_commit(&mut self, commit: &PrivateMessage) -> Result<()>;
+    fn handle_commit(&mut self, commit: PrivateMessage) -> Result<()>;
 }
 
 impl MlsGroup for GroupState {
@@ -175,37 +175,39 @@ impl MlsGroup for GroupState {
         let group_secrets_data = welcome.secrets[0]
             .encrypted_group_secrets
             .open(&key_package_priv.init_priv, &[])?;
-        let group_secrets = GroupSecretsView::deserialize(&mut group_secrets_data.as_slice())?;
+        let group_secrets = GroupSecrets::deserialize(&mut group_secrets_data.as_slice())?;
 
         if !group_secrets.psks.is_empty() {
             return Err(Error("Not implemented"));
         }
 
         // Decrypt the GroupInfo
-        let member_secret = group_secrets.joiner_secret.to_object().advance();
+        let member_secret = group_secrets.joiner_secret.advance();
         let (welcome_key, welcome_nonce) = member_secret.welcome_key_nonce();
 
         let group_info_data = welcome
             .encrypted_group_info
             .open(welcome_key, welcome_nonce, &[])?;
-        let group_info = GroupInfoView::deserialize(&mut group_info_data.as_slice())?;
+        let group_info = GroupInfo::deserialize(&mut group_info_data.as_slice())?;
 
         // Extract the ratchet tree from an extension
-        let ratchet_tree_extension = group_info.extensions.iter().find(|ext| {
-            ext.extension_type.to_object() == protocol::consts::EXTENSION_TYPE_RATCHET_TREE
-        });
+        let ratchet_tree_extension = group_info
+            .extensions
+            .iter()
+            .find(|ext| ext.extension_type == protocol::consts::EXTENSION_TYPE_RATCHET_TREE);
 
         let Some(ratchet_tree_extension) = ratchet_tree_extension else {
             return Err(Error("Not implemented"));
         };
 
-        let ratchet_tree_data = ratchet_tree_extension.extension_data;
-        let ratchet_tree = RatchetTreeView::deserialize(&mut ratchet_tree_data.as_ref())?;
-        let ratchet_tree = ratchet_tree.to_object();
+        let ratchet_tree = {
+            let ratchet_tree_data = &ratchet_tree_extension.extension_data;
+            RatchetTree::deserialize(&mut ratchet_tree_data.as_ref())?
+        };
 
         let tree_hash = ratchet_tree.root_hash()?;
         let parent_hash_valid = ratchet_tree.parent_hash_valid()?;
-        if tree_hash.as_view() != group_info.group_context.tree_hash || !parent_hash_valid {
+        if tree_hash != group_info.group_context.tree_hash || !parent_hash_valid {
             return Err(Error("Invalid ratchet tree"));
         }
 
@@ -215,18 +217,18 @@ impl MlsGroup for GroupState {
         };
 
         // Verify the signature on the GroupInfo
-        let sender = group_info.signer.to_object();
+        let sender = group_info.signer;
         {
             // Scoped to bound the lifetime of signer_leaf
             let Some(signer_leaf) = ratchet_tree.leaf_node_at(sender) else {
                 return Err(Error("GroupInfo signer not present in tree"));
             };
 
-            group_info.to_object().verify(&signer_leaf.signature_key)?;
+            group_info.verify(&signer_leaf.signature_key)?;
         }
 
         // Update the key schedule
-        let group_context = group_info.group_context.to_object();
+        let group_context = group_info.tbs.group_context;
         let group_context_bytes = serialize!(GroupContext, group_context);
         let epoch_secret = member_secret.advance(&group_context_bytes);
 
@@ -240,7 +242,7 @@ impl MlsGroup for GroupState {
             &ratchet_tree,
             my_index,
             sender,
-            group_secrets.path_secret.to_object(),
+            group_secrets.path_secret,
             key_package_priv.encryption_priv,
         )?;
 
@@ -443,15 +445,13 @@ impl MlsGroup for GroupState {
         Ok((private_message, welcome))
     }
 
-    fn handle_commit(&mut self, commit: &PrivateMessage) -> Result<()> {
+    fn handle_commit(&mut self, commit: PrivateMessage) -> Result<()> {
         tick!();
 
         // Unwrap the PrivateMessage and verify its signature
         let sender_data_secret = self.epoch_secret.sender_data_secret();
         let (signed_framed_content, confirmation_tag_message) =
-            commit
-                .as_view()
-                .open(&sender_data_secret, self, &self.group_context)?;
+            commit.open(&sender_data_secret, self, &self.group_context)?;
 
         let Sender::Member(sender) = signed_framed_content.content.sender;
         {
@@ -596,7 +596,7 @@ mod test {
 
             // Everyone in the group handles the commit (note that committer is currently None)
             for state in self.states.iter_mut().filter_map(|s| s.as_mut()) {
-                state.handle_commit(&commit).unwrap();
+                state.handle_commit(commit.clone()).unwrap();
             }
 
             // Committer transitions to a new state
@@ -629,7 +629,7 @@ mod test {
 
             // Everyone in the group handles the commit (note that committer is currently None)
             for state in self.states.iter_mut().filter_map(|s| s.as_mut()) {
-                state.handle_commit(&commit).unwrap();
+                state.handle_commit(commit.clone()).unwrap();
             }
 
             // Committer transitions to a new state
