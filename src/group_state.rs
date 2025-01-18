@@ -6,21 +6,21 @@ use crate::protocol::*;
 use crate::stack::*;
 use crate::syntax::*;
 use crate::treekem::*;
-use crate::{mls_struct, mls_struct_serialize, stack_ptr, tick};
+use crate::{mls_struct, stack_ptr, tick};
 
 mls_struct! {
-    GroupState + GroupStateView,
+    GroupState,
 
     // Shared state
-    ratchet_tree: RatchetTree + RatchetTreeView,
-    group_context: GroupContext + GroupContextView,
-    interim_transcript_hash: HashOutput + HashOutputView,
-    epoch_secret: EpochSecret + EpochSecretView,
+    ratchet_tree: RatchetTree,
+    group_context: GroupContext,
+    interim_transcript_hash: HashOutput,
+    epoch_secret: EpochSecret,
 
     // Local state
-    my_index: LeafIndex + LeafIndexView,
-    my_signature_priv: SignaturePrivateKey + SignaturePrivateKeyView,
-    my_ratchet_tree_priv: RatchetTreePriv + RatchetTreePrivView,
+    my_index: LeafIndex,
+    my_signature_priv: SignaturePrivateKey,
+    my_ratchet_tree_priv: RatchetTreePriv,
 }
 
 impl GroupState {

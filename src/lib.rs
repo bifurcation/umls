@@ -386,7 +386,7 @@ impl MlsGroup for GroupState {
             sender_data,
             key,
             nonce,
-            epoch_secret_prev.sender_data_secret().as_view(),
+            &epoch_secret_prev.sender_data_secret(),
             authenticated_data,
         )?;
 

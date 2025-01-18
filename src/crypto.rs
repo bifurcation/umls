@@ -5,7 +5,6 @@ use crate::syntax::*;
 use crate::{mls_newtype_opaque, mls_newtype_primitive, stack_ptr, tick};
 
 use aes_gcm::{AeadCore, AeadInPlace, Aes128Gcm, KeyInit};
-use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use heapless::Vec;
@@ -36,57 +35,57 @@ pub mod consts {
     pub const AEAD_NONCE_SIZE: usize = 12;
 }
 
-mls_newtype_primitive! { CipherSuite + CipherSuiteView => u16 }
+mls_newtype_primitive! { CipherSuite => u16 }
 
 pub use consts::AEAD_OVERHEAD;
 
 mls_newtype_opaque! {
-    HashOutput + HashOutputView,
+    HashOutput,
     consts::HASH_OUTPUT_SIZE
 }
 
 mls_newtype_opaque! {
-    HpkePrivateKey + HpkePrivateKeyView,
+    HpkePrivateKey,
     consts::HPKE_PRIVATE_KEY_SIZE
 }
 
 mls_newtype_opaque! {
-    HpkePublicKey + HpkePublicKeyView,
+    HpkePublicKey,
     consts::HPKE_PUBLIC_KEY_SIZE
 }
 
 mls_newtype_opaque! {
-    HpkeKemOutput + HpkeKemOutputView,
+    HpkeKemOutput,
     consts::HPKE_KEM_OUTPUT_SIZE
 }
 
 mls_newtype_opaque! {
-    HpkeKemSecret + HpkeKemSecretView,
+    HpkeKemSecret,
     consts::HPKE_KEM_SECRET_SIZE
 }
 
 mls_newtype_opaque! {
-    SignaturePrivateKey + SignaturePrivateKeyView,
+    SignaturePrivateKey,
     consts::SIGNATURE_PRIVATE_KEY_SIZE
 }
 
 mls_newtype_opaque! {
-    SignaturePublicKey + SignaturePublicKeyView,
+    SignaturePublicKey,
     consts::SIGNATURE_PUBLIC_KEY_SIZE
 }
 
 mls_newtype_opaque! {
-    Signature + SignatureView,
+    Signature,
     consts::SIGNATURE_SIZE
 }
 
 mls_newtype_opaque! {
-    AeadKey + AeadKeyView,
+    AeadKey,
     consts::SIGNATURE_SIZE
 }
 
 mls_newtype_opaque! {
-    AeadNonce + AeadNonceView,
+    AeadNonce,
     consts::SIGNATURE_SIZE
 }
 

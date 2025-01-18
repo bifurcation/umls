@@ -5,11 +5,10 @@ use crate::key_schedule::*;
 use crate::stack::*;
 use crate::syntax::*;
 use crate::{
-    make_storage, mls_enum, mls_newtype_opaque, mls_newtype_primitive, mls_struct,
-    mls_struct_serialize, serialize, stack_ptr, tick,
+    make_storage, mls_enum, mls_newtype_opaque, mls_newtype_primitive, mls_struct, serialize,
+    stack_ptr, tick,
 };
 
-use core::marker::PhantomData;
 use core::ops::{Deref, DerefMut};
 use heapless::Vec;
 use rand_core::CryptoRngCore;
@@ -48,18 +47,11 @@ pub mod consts {
 
 // A macro to generate signed data structures
 macro_rules! mls_signed {
-    ($signed_owned_type:ident + $signed_view_type:ident + $label:literal =>
-     $val_owned_type:ident + $val_view_type:ident) => {
+    ($signed_owned_type:ident + $label:literal => $val_owned_type:ident) => {
         #[derive(Clone, Default, Debug, PartialEq)]
         pub struct $signed_owned_type {
             pub tbs: $val_owned_type,
             pub signature: Signature,
-        }
-
-        #[derive(Clone, Debug, PartialEq)]
-        pub struct $signed_view_type<'a> {
-            pub tbs: $val_view_type<'a>,
-            pub signature: SignatureView<'a>,
         }
 
         impl $signed_owned_type {
@@ -122,16 +114,6 @@ macro_rules! mls_signed {
             }
         }
 
-        impl<'a> Deref for $signed_view_type<'a> {
-            type Target = $val_view_type<'a>;
-
-            fn deref(&self) -> &Self::Target {
-                tick!();
-
-                &self.tbs
-            }
-        }
-
         impl Serialize for $signed_owned_type {
             const MAX_SIZE: usize = sum(&[$val_owned_type::MAX_SIZE, Signature::MAX_SIZE]);
 
@@ -152,52 +134,14 @@ macro_rules! mls_signed {
                 Ok(Self { tbs, signature })
             }
         }
-
-        impl<'a> Deserialize<'a> for $signed_view_type<'a> {
-            fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-                tick!();
-
-                let tbs = $val_view_type::deserialize(reader)?;
-                let signature = SignatureView::deserialize(reader)?;
-
-                Ok(Self { tbs, signature })
-            }
-        }
-
-        impl AsView for $signed_owned_type {
-            type View<'a> = $signed_view_type<'a>;
-
-            fn as_view<'a>(&'a self) -> Self::View<'a> {
-                tick!();
-
-                Self::View {
-                    tbs: self.tbs.as_view(),
-                    signature: self.signature.as_view(),
-                }
-            }
-        }
-
-        impl<'a> ToObject for $signed_view_type<'a> {
-            type Object = $signed_owned_type;
-
-            fn to_object(&self) -> Self::Object {
-                tick!();
-
-                Self::Object {
-                    tbs: self.tbs.to_object(),
-                    signature: self.signature.to_object(),
-                }
-            }
-        }
     };
 }
 
 // A macro to generate AEAD-encrypted data structures
 macro_rules! mls_encrypted {
-    ($ct_owned_type:ident + $ct_view_type:ident,
-     $pt_owned_type:ident + $pt_view_type:ident,) => {
+    ($ct_owned_type:ident, $pt_owned_type:ident,) => {
         mls_newtype_opaque! {
-            $ct_owned_type + $ct_view_type,
+            $ct_owned_type,
             { $pt_owned_type::MAX_SIZE + crypto::AEAD_OVERHEAD }
         }
 
@@ -241,13 +185,13 @@ macro_rules! mls_encrypted {
 
 // A macro to generate HPKE-encrypted data structures, with a given AEAD-encrypted struct
 macro_rules! mls_hpke_encrypted {
-    ($hpke_owned_type:ident + $hpke_view_type:ident,
-     $ct_owned_type:ident + $ct_view_type:ident,
-     $pt_owned_type:ident + $pt_view_type:ident,) => {
+    ($hpke_owned_type:ident,
+     $ct_owned_type:ident,
+     $pt_owned_type:ident,) => {
         mls_struct! {
-            $hpke_owned_type + $hpke_view_type,
-            kem_output: HpkeKemOutput + HpkeKemOutputView,
-            ciphertext: $ct_owned_type + $ct_view_type,
+            $hpke_owned_type,
+            kem_output: HpkeKemOutput,
+            ciphertext: $ct_owned_type,
         }
 
         impl $hpke_owned_type {
@@ -313,44 +257,15 @@ impl<'a, V: Deserialize<'a>> Deserialize<'a> for Option<V> {
     }
 }
 
-impl<T: AsView> AsView for Option<T> {
-    type View<'a>
-        = Option<T::View<'a>>
-    where
-        T: 'a;
-
-    fn as_view<'a>(&'a self) -> Self::View<'a> {
-        tick!();
-
-        match self {
-            None => None,
-            Some(val) => Some(val.as_view()),
-        }
-    }
-}
-
-impl<V: ToObject> ToObject for Option<V> {
-    type Object = Option<V::Object>;
-
-    fn to_object(&self) -> Self::Object {
-        tick!();
-
-        match self {
-            None => None,
-            Some(val) => Some(val.to_object()),
-        }
-    }
-}
-
 // Credentials
 mls_newtype_opaque! {
-    BasicCredential + BasicCredentialView,
+    BasicCredential,
     consts::MAX_CREDENTIAL_SIZE
 }
 
 mls_enum! {
-    u16 => Credential + CredentialView,
-    1 => Basic(BasicCredential + BasicCredentialView),
+    u16 => Credential,
+    1 => Basic(BasicCredential),
 }
 
 impl Default for Credential {
@@ -371,49 +286,40 @@ impl From<&[u8]> for Credential {
 }
 
 // Capabilities
-mls_newtype_primitive! { ProtocolVersion + ProtocolVersionView => u16 }
-mls_newtype_primitive! { ExtensionType + ExtensionTypeView => u16 }
-mls_newtype_primitive! { ProposalType + ProposalTypeView => u16 }
-mls_newtype_primitive! { CredentialType + CredentialTypeView => u16 }
+mls_newtype_primitive! { ProtocolVersion => u16 }
+mls_newtype_primitive! { ExtensionType => u16 }
+mls_newtype_primitive! { ProposalType => u16 }
+mls_newtype_primitive! { CredentialType => u16 }
 
 type ProtocolVersionList = Vec<ProtocolVersion, { consts::MAX_PROTOCOL_VERSIONS }>;
-type ProtocolVersionListView<'a> = Vec<ProtocolVersionView<'a>, { consts::MAX_PROTOCOL_VERSIONS }>;
-
 type CipherSuiteList = Vec<CipherSuite, { consts::MAX_CIPHER_SUITES }>;
-type CipherSuiteListView<'a> = Vec<CipherSuiteView<'a>, { consts::MAX_CIPHER_SUITES }>;
-
 type ExtensionTypeList = Vec<ExtensionType, { consts::MAX_EXTENSION_TYPES }>;
-type ExtensionTypeListView<'a> = Vec<ExtensionTypeView<'a>, { consts::MAX_EXTENSION_TYPES }>;
-
 type ProposalTypeList = Vec<ProposalType, { consts::MAX_PROPOSAL_TYPES }>;
-type ProposalTypeListView<'a> = Vec<ProposalTypeView<'a>, { consts::MAX_PROPOSAL_TYPES }>;
-
 type CredentialTypeList = Vec<CredentialType, { consts::MAX_CREDENTIAL_TYPES }>;
-type CredentialTypeListView<'a> = Vec<CredentialTypeView<'a>, { consts::MAX_CREDENTIAL_TYPES }>;
 
 mls_struct! {
-    Capabilities + CapabilitiesView,
-    versions: ProtocolVersionList + ProtocolVersionListView,
-    cipher_suites: CipherSuiteList + CipherSuiteListView,
-    extensions: ExtensionTypeList + ExtensionTypeListView,
-    proposals: ProposalTypeList + ProposalTypeListView,
-    credentials: CredentialTypeList + CredentialTypeListView,
+    Capabilities,
+    versions: ProtocolVersionList,
+    cipher_suites: CipherSuiteList,
+    extensions: ExtensionTypeList,
+    proposals: ProposalTypeList,
+    credentials: CredentialTypeList,
 }
 
 // Leaf node source
-mls_newtype_primitive! { Timestamp + TimestampView => u64 }
+mls_newtype_primitive! { Timestamp => u64 }
 
 mls_struct! {
-    Lifetime + LifetimeView,
-    not_before: Timestamp + TimestampView,
-    not_after: Timestamp + TimestampView,
+    Lifetime,
+    not_before: Timestamp,
+    not_after: Timestamp,
 }
 
 mls_enum! {
-    u8 => LeafNodeSource + LeafNodeSourceView,
-    1 => KeyPackage(Lifetime + LifetimeView),
-    2 => Update(Nil + NilView),
-    3 => Commit(HashOutput + HashOutputView),
+    u8 => LeafNodeSource,
+    1 => KeyPackage(Lifetime),
+    2 => Update(Nil),
+    3 => Commit(HashOutput),
 }
 
 impl Default for LeafNodeSource {
@@ -430,223 +336,211 @@ impl Default for LeafNodeSource {
 
 // Extensions
 mls_newtype_opaque! {
-    ExtensionData + ExtensionDataView,
+    ExtensionData,
     consts::MAX_EXTENSION_SIZE
 }
 
 mls_struct! {
-    Extension + ExtensionView,
-    extension_type: ExtensionType + ExtensionTypeView,
-    extension_data: ExtensionData + ExtensionDataView,
+    Extension,
+    extension_type: ExtensionType,
+    extension_data: ExtensionData,
 }
 
 type ExtensionList = Vec<Extension, { consts::MAX_EXTENSIONS }>;
-type ExtensionListView<'a> = Vec<ExtensionView<'a>, { consts::MAX_EXTENSIONS }>;
 
 // LeafNode
 mls_struct! {
-    LeafNodeTbs + LeafNodeTbsView,
-    encryption_key: HpkePublicKey + HpkePublicKeyView,
-    signature_key: SignaturePublicKey + SignaturePublicKeyView,
-    credential: Credential + CredentialView,
-    capabilities: Capabilities + CapabilitiesView,
-    leaf_node_source: LeafNodeSource + LeafNodeSourceView,
-    extensions: ExtensionList + ExtensionListView,
+    LeafNodeTbs,
+    encryption_key: HpkePublicKey,
+    signature_key: SignaturePublicKey,
+    credential: Credential,
+    capabilities: Capabilities,
+    leaf_node_source: LeafNodeSource,
+    extensions: ExtensionList,
 }
 
 mls_struct! {
-    LeafNodePriv + LeafNodePrivView,
-    encryption_priv: HpkePrivateKey + HpkePrivateKeyView,
-    signature_priv: SignaturePrivateKey + SignaturePrivateKeyView,
+    LeafNodePriv,
+    encryption_priv: HpkePrivateKey,
+    signature_priv: SignaturePrivateKey,
 }
 
-mls_signed! { LeafNode + LeafNodeView + b"LeafNodeTBS" => LeafNodeTbs + LeafNodeTbsView }
+mls_signed! { LeafNode + b"LeafNodeTBS" => LeafNodeTbs }
 
 // KeyPackage
 mls_struct! {
-    KeyPackageTbs + KeyPackageTbsView,
-    protocol_version: ProtocolVersion + ProtocolVersionView,
-    cipher_suite: CipherSuite + CipherSuiteView,
-    init_key: HpkePublicKey + HpkePublicKeyView,
-    leaf_node: LeafNode + LeafNodeView,
-    extensions: ExtensionList + ExtensionListView,
+    KeyPackageTbs,
+    protocol_version: ProtocolVersion,
+    cipher_suite: CipherSuite,
+    init_key: HpkePublicKey,
+    leaf_node: LeafNode,
+    extensions: ExtensionList,
 }
 
 mls_struct! {
-    KeyPackagePriv + KeyPackagePrivView,
-    init_priv: HpkePrivateKey + HpkePrivateKeyView,
-    encryption_priv: HpkePrivateKey + HpkePrivateKeyView,
-    signature_priv: SignaturePrivateKey + SignaturePrivateKeyView,
+    KeyPackagePriv,
+    init_priv: HpkePrivateKey,
+    encryption_priv: HpkePrivateKey,
+    signature_priv: SignaturePrivateKey,
 }
 
-mls_signed! { KeyPackage + KeyPackageView + b"KeyPackageTBS" => KeyPackageTbs + KeyPackageTbsView }
+mls_signed! { KeyPackage + b"KeyPackageTBS" => KeyPackageTbs }
 
 // GroupInfo
 mls_newtype_opaque! {
-    GroupId + GroupIdView,
+    GroupId,
     consts::MAX_GROUP_ID_SIZE
 }
 
-mls_newtype_primitive! { Epoch + EpochView => u64 }
+mls_newtype_primitive! { Epoch => u64 }
 
 mls_struct! {
-    GroupContext + GroupContextView,
-    version: ProtocolVersion + ProtocolVersionView,
-    cipher_suite: CipherSuite + CipherSuiteView,
-    group_id: GroupId + GroupIdView,
-    epoch: Epoch + EpochView,
-    tree_hash: HashOutput + HashOutputView,
-    confirmed_transcript_hash: HashOutput + HashOutputView,
-    extensions: ExtensionList + ExtensionListView,
+    GroupContext,
+    version: ProtocolVersion,
+    cipher_suite: CipherSuite,
+    group_id: GroupId,
+    epoch: Epoch,
+    tree_hash: HashOutput,
+    confirmed_transcript_hash: HashOutput,
+    extensions: ExtensionList,
 }
 
 // Extensions
 mls_newtype_opaque! {
-    GroupInfoExtensionData + GroupInfoExtensionDataView,
+    GroupInfoExtensionData,
     consts::MAX_GROUP_INFO_EXTENSION_SIZE
 }
 
 mls_struct! {
-    GroupInfoExtension + GroupInfoExtensionView,
-    extension_type: ExtensionType + ExtensionTypeView,
-    extension_data: GroupInfoExtensionData + GroupInfoExtensionDataView,
+    GroupInfoExtension,
+    extension_type: ExtensionType,
+    extension_data: GroupInfoExtensionData,
 }
 
 type GroupInfoExtensionList = Vec<GroupInfoExtension, { consts::MAX_GROUP_INFO_EXTENSIONS }>;
-type GroupInfoExtensionListView<'a> =
-    Vec<GroupInfoExtensionView<'a>, { consts::MAX_GROUP_INFO_EXTENSIONS }>;
 
-mls_newtype_primitive! { LeafIndex + LeafIndexView => u32 }
+mls_newtype_primitive! { LeafIndex => u32 }
 
 mls_struct! {
-    GroupInfoTbs + GroupInfoTbsView,
-    group_context: GroupContext + GroupContextView,
-    extensions: GroupInfoExtensionList + GroupInfoExtensionListView,
-    confirmation_tag: HashOutput + HashOutputView,
-    signer: LeafIndex + LeafIndexView,
+    GroupInfoTbs,
+    group_context: GroupContext,
+    extensions: GroupInfoExtensionList,
+    confirmation_tag: HashOutput,
+    signer: LeafIndex,
 }
 
-mls_signed! { GroupInfo + GroupInfoView + b"GroupInfoTBS" => GroupInfoTbs + GroupInfoTbsView }
+mls_signed! { GroupInfo + b"GroupInfoTBS" => GroupInfoTbs }
 
 // Welcome
 
 pub type OptionalPathSecret = Option<HashOutput>;
-pub type OptionalPathSecretView<'a> = Option<HashOutputView<'a>>;
 
 // XXX(RLB) These are stubs for now because we don't support PSKs; the `psks` vector must always
 // have length zero.
 type PreSharedKeyIDList = Vec<Nil, { consts::MAX_WELCOME_PSKS }>;
-type PreSharedKeyIDListView<'a> = Vec<NilView<'a>, { consts::MAX_WELCOME_PSKS }>;
 
 mls_struct! {
-    GroupSecrets + GroupSecretsView,
-    joiner_secret: JoinerSecret + JoinerSecretView,
-    path_secret: OptionalPathSecret + OptionalPathSecretView,
-    psks: PreSharedKeyIDList + PreSharedKeyIDListView,
+    GroupSecrets,
+    joiner_secret: JoinerSecret,
+    path_secret: OptionalPathSecret,
+    psks: PreSharedKeyIDList,
 }
 
 mls_encrypted! {
-    AeadEncryptedGroupSecrets + AeadEncryptedGroupSecretsView,
-    GroupSecrets + GroupSecretsView,
+    AeadEncryptedGroupSecrets,
+    GroupSecrets,
 }
 
 mls_hpke_encrypted! {
-    HpkeEncryptedGroupSecrets + HpkeEncryptedGroupSecretsView,
-    AeadEncryptedGroupSecrets + AeadEncryptedGroupSecretsView,
-    GroupSecrets + GroupSecretsView,
+    HpkeEncryptedGroupSecrets,
+    AeadEncryptedGroupSecrets,
+    GroupSecrets,
 }
 
 mls_struct! {
-    EncryptedGroupSecrets + EncryptedGroupSecretsView,
-    new_member: HashOutput + HashOutputView,
-    encrypted_group_secrets: HpkeEncryptedGroupSecrets + HpkeEncryptedGroupSecretsView,
+    EncryptedGroupSecrets,
+    new_member: HashOutput,
+    encrypted_group_secrets: HpkeEncryptedGroupSecrets,
 }
 
 type EncryptedGroupSecretsList = Vec<EncryptedGroupSecrets, { consts::MAX_JOINERS_PER_WELCOME }>;
-type EncryptedGroupSecretsListView<'a> =
-    Vec<EncryptedGroupSecretsView<'a>, { consts::MAX_JOINERS_PER_WELCOME }>;
 
 mls_encrypted! {
-    EncryptedGroupInfo + EncryptedGroupInfoView,
-    GroupInfo + GroupInfoView,
+    EncryptedGroupInfo,
+    GroupInfo,
 }
 
 mls_struct! {
-    Welcome + WelcomeView,
-    cipher_suite: CipherSuite + CipherSuiteView,
-    secrets: EncryptedGroupSecretsList + EncryptedGroupSecretsListView,
-    encrypted_group_info: EncryptedGroupInfo + EncryptedGroupInfoView,
+    Welcome,
+    cipher_suite: CipherSuite,
+    secrets: EncryptedGroupSecretsList,
+    encrypted_group_info: EncryptedGroupInfo,
 }
 
 // PrivateMessage
 type RawPathSecret = Raw<{ crypto::consts::HASH_OUTPUT_SIZE }>;
-type RawPathSecretView<'a> = RawView<'a, { crypto::consts::HASH_OUTPUT_SIZE }>;
 
 mls_encrypted! {
-    AeadEncryptedPathSecret + AeadEncryptedPathSecretView,
-    RawPathSecret + RawPathSecretView,
+    AeadEncryptedPathSecret,
+    RawPathSecret,
 }
 
 mls_hpke_encrypted! {
-    EncryptedPathSecret + EncryptedPathSecretView,
-    AeadEncryptedPathSecret + AeadEncryptedPathSecretView,
-    RawPathSecret + RawPathSecretView,
+    EncryptedPathSecret,
+    AeadEncryptedPathSecret,
+    RawPathSecret,
 }
 
 type EncryptedPathSecretList = Vec<EncryptedPathSecret, { consts::MAX_TREE_DEPTH }>;
-type EncryptedPathSecretListView<'a> = Vec<EncryptedPathSecretView<'a>, { consts::MAX_TREE_DEPTH }>;
 
 mls_struct! {
-    UpdatePathNode + UpdatePathNodeView,
-    encryption_key: HpkePublicKey + HpkePublicKeyView,
-    encrypted_path_secret: EncryptedPathSecretList + EncryptedPathSecretListView,
+    UpdatePathNode,
+    encryption_key: HpkePublicKey,
+    encrypted_path_secret: EncryptedPathSecretList,
 }
 
 pub type UpdatePathNodeList = Vec<UpdatePathNode, { consts::MAX_TREE_DEPTH }>;
-pub type UpdatePathNodeListView<'a> = Vec<UpdatePathNodeView<'a>, { consts::MAX_TREE_DEPTH }>;
 
 mls_struct! {
-    UpdatePath + UpdatePathView,
-    leaf_node: LeafNode + LeafNodeView,
-    nodes: UpdatePathNodeList + UpdatePathNodeListView,
+    UpdatePath,
+    leaf_node: LeafNode,
+    nodes: UpdatePathNodeList,
 }
 
 mls_struct! {
-    Add + AddView,
-    key_package: KeyPackage + KeyPackageView,
+    Add,
+    key_package: KeyPackage,
 }
 
 mls_struct! {
-    Remove + RemoveView,
-    removed: LeafIndex + LeafIndexView,
+    Remove,
+    removed: LeafIndex,
 }
 
 mls_enum! {
-    u16 => Proposal + ProposalView,
-    1 => Add(Add + AddView),
-    3 => Remove(Remove + RemoveView),
+    u16 => Proposal,
+    1 => Add(Add),
+    3 => Remove(Remove),
 }
 
 mls_enum! {
-    u8 => ProposalOrRef + ProposalOrRefView,
-    1 => Proposal(Proposal + ProposalView),
+    u8 => ProposalOrRef,
+    1 => Proposal(Proposal),
 }
 
 type OptionalUpdatePath = Option<UpdatePath>;
-type OptionalUpdatePathView<'a> = Option<UpdatePathView<'a>>;
 
 type ProposalList = Vec<ProposalOrRef, { consts::MAX_PROPOSALS_PER_COMMIT }>;
-type ProposalListView<'a> = Vec<ProposalOrRefView<'a>, { consts::MAX_PROPOSALS_PER_COMMIT }>;
 
 mls_struct! {
-    Commit + CommitView,
-    proposals: ProposalList + ProposalListView,
-    path: OptionalUpdatePath + OptionalUpdatePathView,
+    Commit,
+    proposals: ProposalList,
+    path: OptionalUpdatePath,
 }
 
 mls_enum! {
-    u8 => Sender + SenderView,
-    1 => Member(LeafIndex + LeafIndexView),
+    u8 => Sender,
+    1 => Member(LeafIndex),
 }
 
 impl Default for Sender {
@@ -658,8 +552,8 @@ impl Default for Sender {
 }
 
 mls_enum! {
-    u8 => MessageContent + MessageContentView,
-    3 => Commit(Commit + CommitView),
+    u8 => MessageContent,
+    3 => Commit(Commit),
 }
 
 impl Default for MessageContent {
@@ -671,24 +565,24 @@ impl Default for MessageContent {
 }
 
 mls_newtype_opaque! {
-    PrivateMessageAad + PrivateMessageAadView,
+    PrivateMessageAad,
     consts::MAX_PRIVATE_MESSAGE_AAD_SIZE
 }
 
 mls_struct! {
-    FramedContent + FramedContentView,
-    group_id: GroupId + GroupIdView,
-    epoch: Epoch + EpochView,
-    sender: Sender + SenderView,
-    authenticated_data: PrivateMessageAad + PrivateMessageAadView,
-    content: MessageContent + MessageContentView,
+    FramedContent,
+    group_id: GroupId,
+    epoch: Epoch,
+    sender: Sender,
+    authenticated_data: PrivateMessageAad,
+    content: MessageContent,
 }
 
-mls_newtype_primitive! { WireFormat + WireFormatView => u16 }
+mls_newtype_primitive! { WireFormat => u16 }
 
 mls_enum! {
-    u8 => FramedContentBinder + FramedContentBinderView,
-    1 => Member(GroupContext + GroupContextView),
+    u8 => FramedContentBinder,
+    1 => Member(GroupContext),
 }
 
 impl Default for FramedContentBinder {
@@ -700,20 +594,20 @@ impl Default for FramedContentBinder {
 }
 
 mls_struct! {
-    FramedContentTbs + FramedContentTbsView,
-    version: ProtocolVersion + ProtocolVersionView,
-    wire_format: WireFormat + WireFormatView,
-    content: FramedContent + FramedContentView,
-    binder: FramedContentBinder + FramedContentBinderView,
+    FramedContentTbs,
+    version: ProtocolVersion,
+    wire_format: WireFormat,
+    content: FramedContent,
+    binder: FramedContentBinder,
 }
 
 mls_signed! {
-    SignedFramedContent + SignedFramedContentView + b"FramedContentTBS"
-    => FramedContentTbs + FramedContentTbsView
+    SignedFramedContent + b"FramedContentTBS"
+    => FramedContentTbs
 }
 
-mls_newtype_primitive! { Generation + GenerationView => u32 }
-mls_newtype_primitive! { ReuseGuard + ReuseGuardView => u32 }
+mls_newtype_primitive! { Generation => u32 }
+mls_newtype_primitive! { ReuseGuard => u32 }
 
 struct SenderDataAad<'a> {
     group_id: &'a GroupId,
@@ -735,15 +629,15 @@ impl<'a> Serialize for SenderDataAad<'a> {
 }
 
 mls_struct! {
-    SenderData + SenderDataView,
-    leaf_index: LeafIndex + LeafIndexView,
-    generation: Generation + GenerationView,
-    reuse_guard: ReuseGuard + ReuseGuardView,
+    SenderData,
+    leaf_index: LeafIndex,
+    generation: Generation,
+    reuse_guard: ReuseGuard,
 }
 
 mls_encrypted! {
-    EncryptedSenderData + EncryptedSenderDataView,
-    SenderData + SenderDataView,
+    EncryptedSenderData,
+    SenderData,
 }
 
 struct PrivateMessageContentAad<'a> {
@@ -773,31 +667,31 @@ impl<'a> Serialize for PrivateMessageContentAad<'a> {
 }
 
 mls_struct! {
-    PrivateMessageContent + PrivateMessageContentView,
-    commit: Commit + CommitView,
+    PrivateMessageContent,
+    commit: Commit,
     // XXX(RLB) Destructured FramedContentAuthData
-    signature: Signature + SignatureView,
-    confirmation_tag: HashOutput + HashOutputView,
+    signature: Signature,
+    confirmation_tag: HashOutput,
     // XXX(RLB) No padding
 }
 
 mls_encrypted! {
-    EncryptedPrivateMessageContent + EncryptedPrivateMessageContentView,
-    PrivateMessageContent + PrivateMessageContentView,
+    EncryptedPrivateMessageContent,
+    PrivateMessageContent,
 }
 
-mls_newtype_primitive! { ContentType + ContentTypeView => u8 }
+mls_newtype_primitive! { ContentType => u8 }
 
 const CONTENT_TYPE_COMMIT: ContentType = ContentType(3);
 
 mls_struct! {
-    PrivateMessage + PrivateMessageView,
-    group_id: GroupId + GroupIdView,
-    epoch: Epoch + EpochView,
-    content_type: ContentType + ContentTypeView,
-    authenticated_data: PrivateMessageAad + PrivateMessageAadView,
-    encrypted_sender_data: EncryptedSenderData + EncryptedSenderDataView,
-    ciphertext: EncryptedPrivateMessageContent + EncryptedPrivateMessageContentView,
+    PrivateMessage,
+    group_id: GroupId,
+    epoch: Epoch,
+    content_type: ContentType,
+    authenticated_data: PrivateMessageAad,
+    encrypted_sender_data: EncryptedSenderData,
+    ciphertext: EncryptedPrivateMessageContent,
 }
 
 impl PrivateMessage {
@@ -807,7 +701,7 @@ impl PrivateMessage {
         sender_data: SenderData,
         key: AeadKey,
         nonce: AeadNonce,
-        sender_data_secret: HashOutputView,
+        sender_data_secret: &HashOutput,
         authenticated_data: PrivateMessageAad,
     ) -> Result<Self> {
         tick!();
@@ -837,8 +731,7 @@ impl PrivateMessage {
         let ciphertext = EncryptedPrivateMessageContent::seal(plaintext, key, nonce, &aad)?;
 
         // Encrypt sender data
-        let (key, nonce) =
-            crypto::sender_data_key_nonce(&sender_data_secret.to_object(), ciphertext.as_ref());
+        let (key, nonce) = crypto::sender_data_key_nonce(sender_data_secret, ciphertext.as_ref());
         let aad = serialize!(
             SenderDataAad,
             SenderDataAad {
@@ -953,7 +846,7 @@ mod test {
     use crate::make_storage;
 
     macro_rules! test_sign_verify {
-        ($signed_owned_type:ident, $signed_view_type:ident, $tbs_owned_type:ident) => {
+        ($signed_owned_type:ident, $tbs_owned_type:ident) => {
             let rng = &mut rand::thread_rng();
             let (signature_priv, signature_key) = crypto::generate_sig(rng).unwrap();
             let tbs = $tbs_owned_type::default();
@@ -963,16 +856,16 @@ mod test {
             signed.serialize(&mut storage).unwrap();
 
             let mut reader = storage.as_slice();
-            let view = $signed_view_type::deserialize(&mut reader).unwrap();
+            let deserialized = $signed_owned_type::deserialize(&mut reader).unwrap();
 
-            view.to_object().verify(&signature_key).unwrap();
+            deserialized.verify(&signature_key).unwrap();
         };
     }
 
     #[test]
     fn signed_objects() {
-        test_sign_verify!(LeafNode, LeafNodeView, LeafNodeTbs);
-        test_sign_verify!(KeyPackage, KeyPackageView, KeyPackageTbs);
-        test_sign_verify!(GroupInfo, GroupInfoView, GroupInfoTbs);
+        test_sign_verify!(LeafNode, LeafNodeTbs);
+        test_sign_verify!(KeyPackage, KeyPackageTbs);
+        test_sign_verify!(GroupInfo, GroupInfoTbs);
     }
 }

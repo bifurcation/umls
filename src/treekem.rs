@@ -5,7 +5,7 @@ use crate::protocol::*;
 use crate::stack::*;
 use crate::syntax::*;
 use crate::tree_math::*;
-use crate::{make_storage, mls_enum, mls_struct, mls_struct_serialize, serialize, stack_ptr, tick};
+use crate::{make_storage, mls_enum, mls_struct, serialize, stack_ptr, tick};
 
 use heapless::{FnvIndexMap, Vec};
 use itertools::Itertools;
@@ -21,13 +21,12 @@ mod consts {
 }
 
 type PathSecretList = Vec<Option<HashOutput>, { consts::MAX_TREE_DEPTH }>;
-type PathSecretListView<'a> = Vec<Option<HashOutputView<'a>>, { consts::MAX_TREE_DEPTH }>;
 
 mls_struct! {
-    RatchetTreePriv + RatchetTreePrivView,
-    encryption_priv: HpkePrivateKey + HpkePrivateKeyView,
-    path_secrets: PathSecretList + PathSecretListView,
-    commit_secret: HashOutput + HashOutputView,
+    RatchetTreePriv,
+    encryption_priv: HpkePrivateKey,
+    path_secrets: PathSecretList,
+    commit_secret: HashOutput,
 }
 
 impl RatchetTreePriv {
@@ -140,19 +139,18 @@ type Resolution = Vec<NodeIndex, { consts::MAX_GROUP_SIZE / 2 }>;
 type ResolutionPath = Vec<(NodeIndex, Resolution), { consts::MAX_TREE_DEPTH }>;
 
 type UnmergedLeavesList = Vec<LeafIndex, { consts::MAX_GROUP_SIZE / 2 }>;
-type UnmergedLeavesListView<'a> = Vec<LeafIndexView<'a>, { consts::MAX_GROUP_SIZE / 2 }>;
 
 mls_struct! {
-    ParentNode + ParentNodeView,
-    public_key: HpkePublicKey + HpkePublicKeyView,
-    parent_hash: HashOutput + HashOutputView,
-    unmerged_leaves: UnmergedLeavesList + UnmergedLeavesListView,
+    ParentNode,
+    public_key: HpkePublicKey,
+    parent_hash: HashOutput,
+    unmerged_leaves: UnmergedLeavesList,
 }
 
 mls_enum! {
-    u8 => Node + NodeView,
-    1 => Leaf(LeafNode + LeafNodeView),
-    2 => Parent(ParentNode + ParentNodeView),
+    u8 => Node,
+    1 => Leaf(LeafNode),
+    2 => Parent(ParentNode),
 }
 
 impl Node {
@@ -187,19 +185,6 @@ type TreeHashCache = FnvIndexMap<(NodeIndex, usize), HashOutput, { consts::MAX_G
 pub struct RatchetTree {
     leaf_nodes: Vec<Option<LeafNode>, { consts::MAX_GROUP_SIZE }>,
     parent_nodes: Vec<Option<ParentNode>, { consts::MAX_GROUP_SIZE }>,
-}
-
-#[derive(Clone, PartialEq, Debug)]
-pub struct RatchetTreeView<'a> {
-    leaf_nodes: Vec<Option<LeafNodeView<'a>>, { consts::MAX_GROUP_SIZE }>,
-    parent_nodes: Vec<Option<ParentNodeView<'a>>, { consts::MAX_GROUP_SIZE }>,
-}
-
-impl<'a> RatchetTreeView<'a> {
-    pub fn size(&self) -> LeafCount {
-        tick!();
-        LeafCount(self.leaf_nodes.len())
-    }
 }
 
 impl Serialize for RatchetTree {
@@ -260,69 +245,6 @@ impl<'a> Deserialize<'a> for RatchetTree {
             leaf_nodes,
             parent_nodes,
         })
-    }
-}
-
-impl<'a> Deserialize<'a> for RatchetTreeView<'a> {
-    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-        tick!();
-        let len = Varint::deserialize(reader)?;
-
-        let mut content = reader.take(len.0)?;
-        let mut leaf_nodes = Vec::new();
-        let mut parent_nodes = Vec::new();
-        let mut leaf = true;
-        while !content.is_empty() {
-            let node = Option::<NodeView>::deserialize(&mut content)?;
-            match node {
-                Some(NodeView::Leaf(node)) if leaf => leaf_nodes.push(Some(node)).unwrap(),
-                None if leaf => leaf_nodes.push(None).unwrap(),
-                Some(NodeView::Parent(node)) if !leaf => parent_nodes.push(Some(node)).unwrap(),
-                None if !leaf => parent_nodes.push(None).unwrap(),
-                _ => return Err(Error("Malformed ratchet tree")),
-            }
-
-            leaf = !leaf;
-        }
-
-        if parent_nodes.len() != leaf_nodes.len() - 1 {
-            return Err(Error("Malformed ratchet tree"));
-        }
-
-        // Pad leaf count to a power of two
-        while leaf_nodes.len().count_ones() > 1 {
-            leaf_nodes.push(None).unwrap();
-            parent_nodes.push(None).unwrap();
-        }
-
-        Ok(Self {
-            leaf_nodes,
-            parent_nodes,
-        })
-    }
-}
-
-impl AsView for RatchetTree {
-    type View<'a> = RatchetTreeView<'a>;
-
-    fn as_view<'a>(&'a self) -> Self::View<'a> {
-        tick!();
-        Self::View {
-            leaf_nodes: self.leaf_nodes.as_view(),
-            parent_nodes: self.parent_nodes.as_view(),
-        }
-    }
-}
-
-impl<'a> ToObject for RatchetTreeView<'a> {
-    type Object = RatchetTree;
-
-    fn to_object(&self) -> Self::Object {
-        tick!();
-        Self::Object {
-            leaf_nodes: self.leaf_nodes.to_object(),
-            parent_nodes: self.parent_nodes.to_object(),
-        }
     }
 }
 

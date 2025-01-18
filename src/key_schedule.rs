@@ -79,12 +79,6 @@ pub struct MemberSecret(HashOutput);
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct WelcomeSecret(HashOutput);
 
-#[derive(Clone, PartialEq, Debug)]
-pub struct EpochSecretView<'a>(HashOutputView<'a>);
-
-#[derive(Clone, PartialEq, Debug)]
-pub struct JoinerSecretView<'a>(HashOutputView<'a>);
-
 impl Serialize for EpochSecret {
     const MAX_SIZE: usize = HashOutput::MAX_SIZE;
 
@@ -99,28 +93,6 @@ impl<'a> Deserialize<'a> for EpochSecret {
     }
 }
 
-impl AsView for EpochSecret {
-    type View<'a> = EpochSecretView<'a>;
-
-    fn as_view<'a>(&'a self) -> Self::View<'a> {
-        EpochSecretView(self.0.as_view())
-    }
-}
-
-impl<'a> Deserialize<'a> for EpochSecretView<'a> {
-    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-        Ok(Self(HashOutputView::deserialize(reader)?))
-    }
-}
-
-impl<'a> ToObject for EpochSecretView<'a> {
-    type Object = EpochSecret;
-
-    fn to_object(&self) -> Self::Object {
-        EpochSecret(self.0.to_object())
-    }
-}
-
 impl Serialize for JoinerSecret {
     const MAX_SIZE: usize = HashOutput::MAX_SIZE;
 
@@ -132,28 +104,6 @@ impl Serialize for JoinerSecret {
 impl<'a> Deserialize<'a> for JoinerSecret {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
         Ok(Self(HashOutput::deserialize(reader)?))
-    }
-}
-
-impl AsView for JoinerSecret {
-    type View<'a> = JoinerSecretView<'a>;
-
-    fn as_view<'a>(&'a self) -> Self::View<'a> {
-        JoinerSecretView(self.0.as_view())
-    }
-}
-
-impl<'a> Deserialize<'a> for JoinerSecretView<'a> {
-    fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
-        Ok(Self(HashOutputView::deserialize(reader)?))
-    }
-}
-
-impl<'a> ToObject for JoinerSecretView<'a> {
-    type Object = JoinerSecret;
-
-    fn to_object(&self) -> Self::Object {
-        JoinerSecret(self.0.to_object())
     }
 }
 
