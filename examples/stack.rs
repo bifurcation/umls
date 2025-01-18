@@ -14,9 +14,8 @@ fn main() {
 
     // Create the group
     let group_id = GroupId::from(Opaque::try_from(b"group_id".as_slice()).unwrap());
-    let (mut state_a, create_group_stack) = stack_usage(|| {
-        GroupState::create(&mut rng, kp_priv.as_view(), kp.as_view(), group_id).unwrap()
-    });
+    let (mut state_a, create_group_stack) =
+        stack_usage(|| GroupState::create(&mut rng, kp_priv, kp, group_id).unwrap());
 
     // Create the second user
     let (sig_priv, sig_key) = crypto::generate_sig(&mut rng).unwrap();
@@ -30,14 +29,8 @@ fn main() {
         stack_usage(|| state_a.send_commit(&mut rng, op).unwrap());
 
     // Second user joins the group
-    let (mut state_b, join_group_1_stack) = stack_usage(|| {
-        GroupState::join(
-            kp_priv.as_view(),
-            kp.as_view(),
-            welcome_1.unwrap().as_view(),
-        )
-        .unwrap()
-    });
+    let (mut state_b, join_group_1_stack) =
+        stack_usage(|| GroupState::join(kp_priv, kp, &welcome_1.unwrap()).unwrap());
 
     println!("make_key_package_0: {:8}", make_key_package_0_stack);
     println!("create_group:       {:8}", create_group_stack);
@@ -60,18 +53,11 @@ fn main() {
             stack_usage(|| state_b.send_commit(&mut rng, op).unwrap());
 
         // Second user joins the group
-        let (_state_c, join_group_2_stack) = stack_usage(|| {
-            GroupState::join(
-                kp_priv.as_view(),
-                kp.as_view(),
-                welcome_2.unwrap().as_view(),
-            )
-            .unwrap()
-        });
+        let (_state_c, join_group_2_stack) =
+            stack_usage(|| GroupState::join(kp_priv, kp, &welcome_2.unwrap()).unwrap());
 
         // Other member handles the commit
-        let ((), handle_commit_2_stack) =
-            stack_usage(|| state_a.handle_commit(commit_2.as_view()).unwrap());
+        let ((), handle_commit_2_stack) = stack_usage(|| state_a.handle_commit(&commit_2).unwrap());
 
         println!("===");
         println!("make_key_package_2: {:8}", make_key_package_2_stack);

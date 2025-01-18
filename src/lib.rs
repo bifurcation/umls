@@ -90,15 +90,15 @@ pub enum Operation {
 pub trait MlsGroup: Sized {
     fn create(
         rng: &mut (impl Rng + CryptoRngCore),
-        key_package_priv: KeyPackagePrivView,
-        key_package: KeyPackageView,
+        key_package_priv: KeyPackagePriv,
+        key_package: KeyPackage,
         group_id: GroupId,
     ) -> Result<Self>;
 
     fn join(
-        key_package_priv: KeyPackagePrivView,
-        key_package: KeyPackageView,
-        welcome: WelcomeView,
+        key_package_priv: KeyPackagePriv,
+        key_package: KeyPackage,
+        welcome: &Welcome,
     ) -> Result<Self>;
 
     fn send_commit(
@@ -107,20 +107,21 @@ pub trait MlsGroup: Sized {
         operation: Operation,
     ) -> Result<(PrivateMessage, Option<Welcome>)>;
 
-    fn handle_commit(&mut self, commit: PrivateMessageView) -> Result<()>;
+    fn handle_commit(&mut self, commit: &PrivateMessage) -> Result<()>;
 }
 
 impl MlsGroup for GroupState {
     fn create(
         rng: &mut (impl Rng + CryptoRngCore),
-        key_package_priv: KeyPackagePrivView,
-        key_package: KeyPackageView,
+        key_package_priv: KeyPackagePriv,
+        key_package: KeyPackage,
         group_id: GroupId,
     ) -> Result<GroupState> {
         tick!();
+
         // Construct the ratchet tree
         let mut ratchet_tree = RatchetTree::default();
-        ratchet_tree.add_leaf(key_package.leaf_node.to_object())?;
+        ratchet_tree.add_leaf(key_package.tbs.leaf_node)?;
 
         // Generate a fresh epoch secret
         let epoch_secret = EpochSecret::from(Opaque::random(rng));
@@ -143,7 +144,7 @@ impl MlsGroup for GroupState {
             transcript_hash::interim(&group_context.confirmed_transcript_hash, &confirmation_tag)?;
 
         let my_ratchet_tree_priv = RatchetTreePriv {
-            encryption_priv: key_package_priv.encryption_priv.to_object(),
+            encryption_priv: key_package_priv.encryption_priv,
             ..Default::default()
         };
 
@@ -153,27 +154,28 @@ impl MlsGroup for GroupState {
             interim_transcript_hash,
             epoch_secret,
             my_index: LeafIndex(0),
-            my_signature_priv: key_package_priv.signature_priv.to_object(),
+            my_signature_priv: key_package_priv.signature_priv,
             my_ratchet_tree_priv,
         })
     }
 
     fn join(
-        key_package_priv: KeyPackagePrivView,
-        key_package: KeyPackageView,
-        welcome: WelcomeView,
+        key_package_priv: KeyPackagePriv,
+        key_package: KeyPackage,
+        welcome: &Welcome,
     ) -> Result<GroupState> {
         tick!();
         // Verify that the Welcome is for us
-        let kp_ref = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package.to_object())?;
-        if welcome.secrets[0].new_member != kp_ref.as_view() {
+        let kp_ref = crypto::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package)?;
+        if welcome.secrets[0].new_member != kp_ref {
             return Err(Error("Misdirected Welcome"));
         }
 
         // Decrypt the Group Secrets
         let group_secrets_data = welcome.secrets[0]
             .encrypted_group_secrets
-            .open(key_package_priv.init_priv, &[])?;
+            .as_view()
+            .open(key_package_priv.init_priv.as_view(), &[])?;
         let group_secrets = GroupSecretsView::deserialize(&mut group_secrets_data.as_slice())?;
 
         if !group_secrets.psks.is_empty() {
@@ -184,9 +186,11 @@ impl MlsGroup for GroupState {
         let member_secret = group_secrets.joiner_secret.advance();
         let (welcome_key, welcome_nonce) = member_secret.welcome_key_nonce();
 
-        let group_info_data = welcome
-            .encrypted_group_info
-            .open(welcome_key, welcome_nonce, &[])?;
+        let group_info_data =
+            welcome
+                .encrypted_group_info
+                .as_view()
+                .open(welcome_key, welcome_nonce, &[])?;
         let group_info = GroupInfoView::deserialize(&mut group_info_data.as_slice())?;
 
         // Extract the ratchet tree from an extension
@@ -209,7 +213,7 @@ impl MlsGroup for GroupState {
         }
 
         // Find our own leaf in the ratchet tree
-        let Some(my_index) = ratchet_tree.find(key_package.leaf_node.clone()) else {
+        let Some(my_index) = ratchet_tree.find(key_package.leaf_node.as_view()) else {
             return Err(Error("Joiner not present in tree"));
         };
 
@@ -240,7 +244,7 @@ impl MlsGroup for GroupState {
             my_index,
             sender,
             group_secrets.path_secret,
-            key_package_priv.encryption_priv,
+            key_package_priv.encryption_priv.as_view(),
         )?;
 
         assert!(my_ratchet_tree_priv.consistent(&ratchet_tree, my_index));
@@ -252,7 +256,7 @@ impl MlsGroup for GroupState {
             interim_transcript_hash,
             epoch_secret,
             my_index,
-            my_signature_priv: key_package_priv.signature_priv.to_object(),
+            my_signature_priv: key_package_priv.signature_priv,
             my_ratchet_tree_priv,
         })
     }
@@ -351,18 +355,16 @@ impl MlsGroup for GroupState {
 
         // Update the confirmed transcript hash
         self.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
-            self.interim_transcript_hash.as_view(),
+            &self.interim_transcript_hash,
             &signed_framed_content.content,
             &signed_framed_content.signature,
         )?;
 
         // Ratchet forward the key schedule
         let commit_secret = self.my_ratchet_tree_priv.commit_secret();
-        let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = epoch_secret_prev
-            .as_view()
-            .advance(commit_secret.as_view(), &self.group_context)?;
-
-        self.epoch_secret = epoch_secret;
+        let (joiner_secret, welcome_key, welcome_nonce) = self
+            .epoch_secret
+            .advance(&commit_secret, &self.group_context)?;
 
         // Form the PrivateMessage
         let confirmation_tag = self
@@ -450,13 +452,15 @@ impl MlsGroup for GroupState {
         Ok((private_message, welcome))
     }
 
-    fn handle_commit(&mut self, commit: PrivateMessageView) -> Result<()> {
+    fn handle_commit(&mut self, commit: &PrivateMessage) -> Result<()> {
         tick!();
 
         // Unwrap the PrivateMessage and verify its signature
         let sender_data_secret = self.epoch_secret.sender_data_secret();
         let (signed_framed_content, confirmation_tag_message) =
-            commit.open(&sender_data_secret, self, &self.group_context)?;
+            commit
+                .as_view()
+                .open(&sender_data_secret, self, &self.group_context)?;
 
         let Sender::Member(sender) = signed_framed_content.content.sender;
         {
@@ -524,19 +528,16 @@ impl MlsGroup for GroupState {
 
         // Update the confirmed transcript hash
         self.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
-            self.interim_transcript_hash.as_view(),
+            &self.interim_transcript_hash,
             &signed_framed_content.content,
             &signed_framed_content.signature,
         )?;
 
         // Ratchet forward the key schedule
         let commit_secret = self.my_ratchet_tree_priv.commit_secret();
-        let (epoch_secret, joiner_secret, welcome_key, welcome_nonce) = self
+        let (joiner_secret, welcome_key, welcome_nonce) = self
             .epoch_secret
-            .as_view()
-            .advance(commit_secret.as_view(), &self.group_context)?;
-
-        self.epoch_secret = epoch_secret;
+            .advance(&commit_secret, &self.group_context)?;
 
         // Verify the confirmation tag
         let confirmation_tag_computed = self
@@ -584,8 +585,7 @@ mod test {
             let group_id = GroupId::from(Opaque::try_from(group_id).unwrap());
 
             let (kp_priv, kp) = make_user(&mut rng, creator_name);
-            let state =
-                GroupState::create(&mut rng, kp_priv.as_view(), kp.as_view(), group_id).unwrap();
+            let state = GroupState::create(&mut rng, kp_priv, kp, group_id).unwrap();
 
             let mut states = Vec::new();
             states.push(Some(state)).unwrap();
@@ -603,13 +603,11 @@ mod test {
 
             let mut committer_state = self.states[committer].take().unwrap();
             let (commit, welcome) = committer_state.send_commit(&mut rng, op).unwrap();
-            let joiner_state =
-                GroupState::join(kp_priv.as_view(), kp.as_view(), welcome.unwrap().as_view())
-                    .unwrap();
+            let joiner_state = GroupState::join(kp_priv, kp, &welcome.unwrap()).unwrap();
 
             // Everyone in the group handles the commit (note that committer is currently None)
             for state in self.states.iter_mut().filter_map(|s| s.as_mut()) {
-                state.handle_commit(commit.as_view()).unwrap();
+                state.handle_commit(&commit).unwrap();
             }
 
             // Committer transitions to a new state
@@ -642,7 +640,7 @@ mod test {
 
             // Everyone in the group handles the commit (note that committer is currently None)
             for state in self.states.iter_mut().filter_map(|s| s.as_mut()) {
-                state.handle_commit(commit.as_view()).unwrap();
+                state.handle_commit(&commit).unwrap();
             }
 
             // Committer transitions to a new state

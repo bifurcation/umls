@@ -108,30 +108,23 @@ to_from_hash_output! { JoinerSecret + JoinerSecretView }
 to_from_hash_output! { MemberSecret + MemberSecretView }
 to_from_hash_output! { WelcomeSecret + WelcomeSecretView }
 
-impl<'a> EpochSecretView<'a> {
+impl EpochSecret {
     pub fn advance(
-        self,
-        commit_secret: HashOutputView,
+        &mut self,
+        commit_secret: &HashOutput,
         group_context: &GroupContext,
-    ) -> Result<(EpochSecret, JoinerSecret, AeadKey, AeadNonce)> {
+    ) -> Result<(JoinerSecret, AeadKey, AeadNonce)> {
         tick!();
         let group_context = serialize!(GroupContext, group_context);
 
-        let joiner_secret = JoinerSecret::new(self, commit_secret, &group_context);
+        let joiner_secret = JoinerSecret::new(&self, commit_secret, &group_context);
         let member_secret = joiner_secret.as_view().advance();
         let (welcome_key, welcome_nonce) = member_secret.welcome_key_nonce();
-        let epoch_secret = member_secret.advance(&group_context);
+        *self = member_secret.advance(&group_context);
 
-        Ok((
-            epoch_secret.into(),
-            joiner_secret.into(),
-            welcome_key,
-            welcome_nonce,
-        ))
+        Ok((joiner_secret.into(), welcome_key, welcome_nonce))
     }
-}
 
-impl EpochSecret {
     pub fn confirmation_tag(&self, confirmed_transcript_hash: &HashOutput) -> HashOutput {
         tick!();
         let confirmation_key = crypto::derive_secret(self.as_view().into(), b"confirm");
@@ -182,13 +175,14 @@ impl EpochSecret {
 
 impl JoinerSecret {
     pub fn new(
-        epoch_secret: EpochSecretView,
-        commit_secret: HashOutputView,
+        epoch_secret: &EpochSecret,
+        commit_secret: &HashOutput,
         group_context: &[u8],
     ) -> Self {
         tick!();
-        let init_secret = crypto::derive_secret(epoch_secret.into(), b"init");
-        let pre_joiner_secret = crypto::extract(init_secret.as_view().into(), commit_secret);
+        let init_secret = crypto::derive_secret(epoch_secret.as_view().into(), b"init");
+        let pre_joiner_secret =
+            crypto::extract(init_secret.as_view().into(), commit_secret.as_view());
         crypto::expand_with_label(pre_joiner_secret.as_view(), b"joiner", &group_context).into()
     }
 }

@@ -7,7 +7,7 @@ use crate::syntax::Serialize;
 use crate::{stack_ptr, tick};
 
 pub fn confirmed(
-    interim_transcript_hash: HashOutputView,
+    interim_transcript_hash: &HashOutput,
     content: &FramedContent,
     signature: &Signature,
 ) -> Result<HashOutput> {
