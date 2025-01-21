@@ -69,6 +69,8 @@ macro_rules! mls_signed {
                 tbs: $val_owned_type,
                 signature_priv: &SignaturePrivateKey,
             ) -> Result<$signed_owned_type> {
+                tick!();
+
                 // Serialize the part to be signed
                 let tbs_raw = serialize!($val_owned_type, tbs);
 
@@ -81,6 +83,8 @@ macro_rules! mls_signed {
             }
 
             pub fn re_sign(&mut self, signature_priv: &SignaturePrivateKey) -> Result<()> {
+                tick!();
+
                 let tbs_raw = serialize!($val_owned_type, self.tbs);
                 self.signature =
                     crypto::sign_with_label(&tbs_raw, Self::SIGNATURE_LABEL, signature_priv)?;
@@ -88,6 +92,8 @@ macro_rules! mls_signed {
             }
 
             pub fn verify(&self, signature_key: &SignaturePublicKey) -> Result<()> {
+                tick!();
+
                 let tbs_raw = serialize!($val_owned_type, self.tbs);
                 crypto::verify_with_label(
                     tbs_raw.as_ref(),
@@ -102,12 +108,16 @@ macro_rules! mls_signed {
             type Target = $val_owned_type;
 
             fn deref(&self) -> &Self::Target {
+                tick!();
+
                 &self.tbs
             }
         }
 
         impl DerefMut for $signed_owned_type {
             fn deref_mut(&mut self) -> &mut Self::Target {
+                tick!();
+
                 &mut self.tbs
             }
         }
@@ -116,6 +126,8 @@ macro_rules! mls_signed {
             type Target = $val_view_type<'a>;
 
             fn deref(&self) -> &Self::Target {
+                tick!();
+
                 &self.tbs
             }
         }
@@ -124,6 +136,8 @@ macro_rules! mls_signed {
             const MAX_SIZE: usize = sum(&[$val_owned_type::MAX_SIZE, Signature::MAX_SIZE]);
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                tick!();
+
                 self.tbs.serialize(writer)?;
                 self.signature.serialize(writer)?;
                 Ok(())
@@ -132,6 +146,8 @@ macro_rules! mls_signed {
 
         impl<'a> Deserialize<'a> for $signed_view_type<'a> {
             fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+                tick!();
+
                 let tbs = $val_view_type::deserialize(reader)?;
                 let signature = SignatureView::deserialize(reader)?;
 
@@ -143,6 +159,8 @@ macro_rules! mls_signed {
             type View<'a> = $signed_view_type<'a>;
 
             fn as_view<'a>(&'a self) -> Self::View<'a> {
+                tick!();
+
                 Self::View {
                     tbs: self.tbs.as_view(),
                     signature: self.signature.as_view(),
@@ -154,6 +172,8 @@ macro_rules! mls_signed {
             type Object = $signed_owned_type;
 
             fn to_object(&self) -> Self::Object {
+                tick!();
+
                 Self::Object {
                     tbs: self.tbs.to_object(),
                     signature: self.signature.to_object(),
@@ -181,6 +201,8 @@ macro_rules! mls_encrypted {
                 nonce: AeadNonce,
                 aad: &[u8],
             ) -> Result<Self> {
+                tick!();
+
                 let pt = serialize!($pt_owned_type, plaintext);
 
                 let mut ct = Vec::<u8, { Self::MAX_CT_SIZE }>::new();
@@ -195,6 +217,8 @@ macro_rules! mls_encrypted {
                 nonce: AeadNonce,
                 aad: &[u8],
             ) -> Result<Vec<u8, { $pt_owned_type::MAX_SIZE }>> {
+                tick!();
+
                 let ct = self.0.as_ref();
 
                 let mut pt = Vec::new();
@@ -224,6 +248,8 @@ macro_rules! mls_hpke_encrypted {
                 encryption_key: &HpkePublicKey,
                 aad: &[u8],
             ) -> Result<Self> {
+                tick!();
+
                 let (kem_output, kem_secret) = crypto::hpke_encap(rng, &encryption_key);
                 let (key, nonce) = crypto::hpke_key_nonce(kem_secret);
 
@@ -240,6 +266,8 @@ macro_rules! mls_hpke_encrypted {
                 encryption_priv: &HpkePrivateKey,
                 aad: &[u8],
             ) -> Result<Vec<u8, { $pt_owned_type::MAX_SIZE }>> {
+                tick!();
+
                 let kem_secret = crypto::hpke_decap(encryption_priv, &self.kem_output);
                 let (key, nonce) = crypto::hpke_key_nonce(kem_secret);
 
@@ -254,6 +282,8 @@ impl<T: Serialize> Serialize for Option<T> {
     const MAX_SIZE: usize = 1 + T::MAX_SIZE;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
+
         match self {
             None => writer.write(&[0]),
             Some(val) => writer.write(&[1]).and_then(|_| val.serialize(writer)),
@@ -263,6 +293,8 @@ impl<T: Serialize> Serialize for Option<T> {
 
 impl<'a, V: Deserialize<'a>> Deserialize<'a> for Option<V> {
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self> {
+        tick!();
+
         let indicator = u8::deserialize(reader)?;
         match indicator {
             0 => Ok(None),
@@ -279,6 +311,8 @@ impl<T: AsView> AsView for Option<T> {
         T: 'a;
 
     fn as_view<'a>(&'a self) -> Self::View<'a> {
+        tick!();
+
         match self {
             None => None,
             Some(val) => Some(val.as_view()),
@@ -290,6 +324,8 @@ impl<V: ToObject> ToObject for Option<V> {
     type Object = Option<V::Object>;
 
     fn to_object(&self) -> Self::Object {
+        tick!();
+
         match self {
             None => None,
             Some(val) => Some(val.to_object()),
@@ -310,12 +346,16 @@ mls_enum! {
 
 impl Default for Credential {
     fn default() -> Self {
+        tick!();
+
         Self::Basic(BasicCredential::default())
     }
 }
 
 impl From<&[u8]> for Credential {
     fn from(val: &[u8]) -> Self {
+        tick!();
+
         let vec: Vec<u8, { consts::MAX_CREDENTIAL_SIZE }> = val.try_into().unwrap();
         Credential::Basic(BasicCredential::from(Opaque::from(vec)))
     }
@@ -369,6 +409,8 @@ mls_enum! {
 
 impl Default for LeafNodeSource {
     fn default() -> Self {
+        tick!();
+
         let infinite_lifetime = Lifetime {
             not_before: Timestamp(0),
             not_after: Timestamp(u64::MAX),
@@ -600,6 +642,8 @@ mls_enum! {
 
 impl Default for Sender {
     fn default() -> Self {
+        tick!();
+
         Self::Member(LeafIndex(0))
     }
 }
@@ -611,6 +655,8 @@ mls_enum! {
 
 impl Default for MessageContent {
     fn default() -> Self {
+        tick!();
+
         Self::Commit(Commit::default())
     }
 }
@@ -638,6 +684,8 @@ mls_enum! {
 
 impl Default for FramedContentBinder {
     fn default() -> Self {
+        tick!();
+
         Self::Member(GroupContext::default())
     }
 }
@@ -668,6 +716,8 @@ impl<'a> Serialize for SenderDataAad<'a> {
     const MAX_SIZE: usize = sum(&[GroupId::MAX_SIZE, Epoch::MAX_SIZE, ContentType::MAX_SIZE]);
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
+
         self.group_id.serialize(writer)?;
         self.epoch.serialize(writer)?;
         self.content_type.serialize(writer)?;
@@ -703,6 +753,8 @@ impl<'a> Serialize for PrivateMessageContentAad<'a> {
     ]);
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        tick!();
+
         self.group_id.serialize(writer)?;
         self.epoch.serialize(writer)?;
         self.content_type.serialize(writer)?;
@@ -749,6 +801,8 @@ impl PrivateMessage {
         sender_data_secret: HashOutputView,
         authenticated_data: PrivateMessageAad,
     ) -> Result<Self> {
+        tick!();
+
         // Form payload
         let MessageContent::Commit(commit) = signed_framed_content.tbs.content.content;
         let signature = signed_framed_content.signature;
@@ -805,6 +859,8 @@ impl<'a> PrivateMessageView<'a> {
         sender_key_source: &impl SenderKeySource,
         group_context: &GroupContext,
     ) -> Result<(SignedFramedContent, HashOutput)> {
+        tick!();
+
         // Check outer properties are correct
         if self.group_id != group_context.group_id.as_view() {
             return Err(Error("Wrong group"));
