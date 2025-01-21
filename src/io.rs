@@ -53,30 +53,32 @@ impl Write for CountWriter {
     }
 }
 
-impl<'a> ReadRef<'a> for &'a [u8] {
+pub struct SliceReader<'a>(pub &'a [u8]);
+
+impl<'a> ReadRef<'a> for SliceReader<'a> {
     fn read_ref(&mut self, n: usize) -> Result<&'a [u8]> {
-        if self.len() < n {
+        if self.0.len() < n {
             return Err(Error("Insufficient data"));
         }
 
-        let (data, rest) = self.split_at(n);
-        *self = rest;
+        let (data, rest) = self.0.split_at(n);
+        self.0 = rest;
         Ok(data)
     }
 
     fn is_empty(&self) -> bool {
-        <[u8]>::is_empty(self)
+        self.0.is_empty()
     }
 
     fn take(&mut self, n: usize) -> Result<Self> {
-        self.read_ref(n)
+        Ok(Self(self.read_ref(n)?))
     }
 
     fn peek(&self) -> Result<u8> {
         if self.is_empty() {
             Err(Error("Insufficient data"))
         } else {
-            Ok(self[0])
+            Ok(self.0[0])
         }
     }
 }
@@ -115,7 +117,7 @@ mod test {
     fn read() {
         // Successful raed
         const DATA: &[u8] = &[0, 2, 4, 6, 8, 10, 12, 14];
-        let mut reader = DATA;
+        let mut reader = SliceReader(DATA);
         assert_eq!(reader.peek().unwrap(), 0);
 
         let view = reader.read_ref(3).unwrap();

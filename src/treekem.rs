@@ -676,7 +676,7 @@ impl RatchetTree {
         };
 
         // Decrypt the path secret
-        let encrypted_path_secret =
+        let mut encrypted_path_secret =
             update_path.nodes[update_path_index].encrypted_path_secret[res_index].clone();
         let raw_path_secret = encrypted_path_secret.open(encryption_priv, &group_context)?;
         let mut path_secret = HashOutput(Opaque::from(raw_path_secret));

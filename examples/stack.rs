@@ -30,7 +30,7 @@ fn main() {
 
     // Second user joins the group
     let (mut state_b, join_group_1_stack) =
-        stack_usage(|| GroupState::join(kp_priv, kp, &welcome_1.unwrap()).unwrap());
+        stack_usage(|| GroupState::join(kp_priv, kp, &mut welcome_1.unwrap()).unwrap());
 
     println!("make_key_package_0: {:8}", make_key_package_0_stack);
     println!("create_group:       {:8}", create_group_stack);
@@ -54,7 +54,7 @@ fn main() {
 
         // Second user joins the group
         let (_state_c, join_group_2_stack) =
-            stack_usage(|| GroupState::join(kp_priv, kp, &welcome_2.unwrap()).unwrap());
+            stack_usage(|| GroupState::join(kp_priv, kp, &mut welcome_2.unwrap()).unwrap());
 
         // Other member handles the commit
         let ((), handle_commit_2_stack) = stack_usage(|| state_a.handle_commit(commit_2).unwrap());

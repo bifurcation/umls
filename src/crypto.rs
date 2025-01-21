@@ -4,7 +4,7 @@ use crate::stack::*;
 use crate::syntax::*;
 use crate::{mls_newtype_opaque, mls_newtype_primitive, stack_ptr, tick};
 
-use aes_gcm::{AeadCore, AeadInPlace, Aes128Gcm, KeyInit};
+use aes_gcm::{aead::Buffer, AeadCore, AeadInPlace, Aes128Gcm, KeyInit};
 use core::ops::{Deref, DerefMut};
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use heapless::Vec;
@@ -515,33 +515,45 @@ pub fn hpke_key_nonce(secret: HpkeKemSecret) -> (AeadKey, AeadNonce) {
     hpke::key_schedule(secret.as_ref())
 }
 
-pub fn aead_seal<const N: usize>(
-    ct: &mut Vec<u8, N>,
-    pt: &[u8],
-    key: AeadKey,
-    nonce: AeadNonce,
-    aad: &[u8],
-) {
+struct VecAsBuffer<'a, const N: usize>(&'a mut Vec<u8, N>);
+
+impl<'a, const N: usize> AsRef<[u8]> for VecAsBuffer<'a, N> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl<'a, const N: usize> AsMut<[u8]> for VecAsBuffer<'a, N> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.0.as_mut()
+    }
+}
+
+impl<'a, const N: usize> Buffer for VecAsBuffer<'a, N> {
+    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
+        self.0.extend_from_slice(other).map_err(|_| aead::Error)
+    }
+
+    fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+}
+
+pub fn aead_seal<const N: usize>(ct: &mut Vec<u8, N>, key: AeadKey, nonce: AeadNonce, aad: &[u8]) {
     type Key = aes_gcm::Key<Aes128Gcm>;
     type Nonce = aes_gcm::Nonce<<Aes128Gcm as AeadCore>::NonceSize>;
 
     let key: &Key = key.as_ref().into();
     let nonce: &Nonce = nonce.as_ref().into();
 
-    // AES-GCM crate requires a different version of heapless
-    let mut inner_ct = aes_gcm::aead::heapless::Vec::<u8, N>::new();
-    inner_ct.extend_from_slice(pt).unwrap();
-
     let aead = Aes128Gcm::new(key);
-    aead.encrypt_in_place(nonce, aad, &mut inner_ct).unwrap();
-
-    ct.clear();
-    ct.extend_from_slice(&inner_ct).unwrap()
+    aead.encrypt_in_place(nonce, aad, &mut VecAsBuffer(ct))
+        .unwrap();
 }
 
-pub fn aead_open<const N: usize>(
-    pt: &mut Vec<u8, N>,
-    ct: &[u8],
+pub fn aead_open(
+    pt: &mut [u8],
+    tag: &[u8],
     key: AeadKey,
     nonce: AeadNonce,
     aad: &[u8],
@@ -552,18 +564,9 @@ pub fn aead_open<const N: usize>(
     let key: &Key = key.as_ref().into();
     let nonce: &Nonce = nonce.as_ref().into();
 
-    // AES-GCM crate requires a different version of heapless
-    let mut inner_pt = aes_gcm::aead::heapless::Vec::<u8, N>::new();
-
-    let (ct, tag) = ct.split_at(ct.len() - consts::AEAD_OVERHEAD);
-    inner_pt.extend_from_slice(ct).unwrap();
-
     let aead = Aes128Gcm::new(key);
-    aead.decrypt_in_place_detached(nonce, aad, &mut inner_pt, tag.into())
-        .map_err(|_| Error("AEAD error"))
-        .unwrap(); // XXX
+    aead.decrypt_in_place_detached(nonce, aad, pt, tag.into())
+        .map_err(|_| Error("AEAD error"))?;
 
-    pt.clear();
-    pt.extend_from_slice(&inner_pt).unwrap();
     Ok(())
 }

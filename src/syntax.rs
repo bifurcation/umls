@@ -543,11 +543,13 @@ macro_rules! mls_enum {
 mod test {
     use super::*;
 
+    use crate::io::SliceReader;
+
     use core::fmt::Debug;
     use core::ops::{Deref, DerefMut};
     use hex_literal::hex;
 
-    fn test_serde<'a, T, const N: usize>(val: &'a T, mut bytes: &'a [u8], mut storage: Vec<u8, N>)
+    fn test_serde<'a, T, const N: usize>(val: &'a T, bytes: &'a [u8], mut storage: Vec<u8, N>)
     where
         T: Serialize + Deserialize<'a> + PartialEq + Debug + 'a,
     {
@@ -556,7 +558,7 @@ mod test {
         assert_eq!(&storage, bytes);
 
         // Deserialization
-        let deserialized = T::deserialize(&mut bytes).unwrap();
+        let deserialized = T::deserialize(&mut SliceReader(bytes)).unwrap();
         assert_eq!(&deserialized, val);
     }
 

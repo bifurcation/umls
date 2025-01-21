@@ -17,6 +17,7 @@ pub mod treekem;
 use common::*;
 use crypto::*;
 use group_state::*;
+use io::SliceReader;
 use key_schedule::*;
 use protocol::*;
 use stack::*;
@@ -98,7 +99,7 @@ pub trait MlsGroup: Sized {
     fn join(
         key_package_priv: KeyPackagePriv,
         key_package: KeyPackage,
-        welcome: &Welcome,
+        welcome: &mut Welcome,
     ) -> Result<Self>;
 
     fn send_commit(
@@ -162,7 +163,7 @@ impl MlsGroup for GroupState {
     fn join(
         key_package_priv: KeyPackagePriv,
         key_package: KeyPackage,
-        welcome: &Welcome,
+        welcome: &mut Welcome,
     ) -> Result<GroupState> {
         tick!();
         // Verify that the Welcome is for us
@@ -172,10 +173,9 @@ impl MlsGroup for GroupState {
         }
 
         // Decrypt the Group Secrets
-        let group_secrets_data = welcome.secrets[0]
+        let group_secrets = welcome.secrets[0]
             .encrypted_group_secrets
             .open(&key_package_priv.init_priv, &[])?;
-        let group_secrets = GroupSecrets::deserialize(&mut group_secrets_data.as_slice())?;
 
         if !group_secrets.psks.is_empty() {
             return Err(Error("Not implemented"));
@@ -185,10 +185,9 @@ impl MlsGroup for GroupState {
         let member_secret = group_secrets.joiner_secret.advance();
         let (welcome_key, welcome_nonce) = member_secret.welcome_key_nonce();
 
-        let group_info_data = welcome
+        let group_info = welcome
             .encrypted_group_info
             .open(welcome_key, welcome_nonce, &[])?;
-        let group_info = GroupInfo::deserialize(&mut group_info_data.as_slice())?;
 
         // Extract the ratchet tree from an extension
         let ratchet_tree_extension = group_info
@@ -202,7 +201,7 @@ impl MlsGroup for GroupState {
 
         let ratchet_tree = {
             let ratchet_tree_data = &ratchet_tree_extension.extension_data;
-            RatchetTree::deserialize(&mut ratchet_tree_data.as_ref())?
+            RatchetTree::deserialize(&mut SliceReader(ratchet_tree_data.as_ref()))?
         };
 
         let tree_hash = ratchet_tree.root_hash()?;
@@ -592,7 +591,7 @@ mod test {
 
             let mut committer_state = self.states[committer].take().unwrap();
             let (commit, welcome) = committer_state.send_commit(&mut rng, op).unwrap();
-            let joiner_state = GroupState::join(kp_priv, kp, &welcome.unwrap()).unwrap();
+            let joiner_state = GroupState::join(kp_priv, kp, &mut welcome.unwrap()).unwrap();
 
             // Everyone in the group handles the commit (note that committer is currently None)
             for state in self.states.iter_mut().filter_map(|s| s.as_mut()) {

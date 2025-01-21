@@ -156,28 +156,32 @@ macro_rules! mls_encrypted {
             ) -> Result<Self> {
                 tick!();
 
-                let pt = serialize!($pt_owned_type, plaintext);
-
                 let mut ct = Vec::<u8, { Self::MAX_CT_SIZE }>::new();
-                crypto::aead_seal(&mut ct, &pt, key, nonce, aad);
+                plaintext.serialize(&mut ct)?;
+                crypto::aead_seal(&mut ct, key, nonce, aad);
 
                 Ok(Self(Opaque::from(ct)))
             }
 
             pub fn open(
-                &self,
+                &mut self,
                 key: AeadKey,
                 nonce: AeadNonce,
                 aad: &[u8],
-            ) -> Result<Vec<u8, { $pt_owned_type::MAX_SIZE }>> {
+            ) -> Result<$pt_owned_type> {
                 tick!();
 
-                let ct = self.0.as_ref();
+                let vec = &mut self.0 .0;
+                if vec.len() < crypto::AEAD_OVERHEAD {
+                    return Err(Error("Malformed ciphertext"));
+                }
 
-                let mut pt = Vec::new();
-                let len = crypto::aead_open(&mut pt, &ct, key, nonce, aad)?;
+                let cut = vec.len() - crypto::AEAD_OVERHEAD;
+                let (pt, tag) = vec.split_at_mut(cut);
+                crypto::aead_open(pt, tag, key, nonce, aad)?;
 
-                Ok(pt)
+                let val = $pt_owned_type::deserialize(&mut SliceReader(pt))?;
+                Ok(val)
             }
         }
     };
@@ -215,10 +219,10 @@ macro_rules! mls_hpke_encrypted {
             }
 
             pub fn open(
-                &self,
+                &mut self,
                 encryption_priv: &HpkePrivateKey,
                 aad: &[u8],
-            ) -> Result<Vec<u8, { $pt_owned_type::MAX_SIZE }>> {
+            ) -> Result<$pt_owned_type> {
                 tick!();
 
                 let kem_secret = crypto::hpke_decap(encryption_priv, &self.kem_output);
@@ -754,7 +758,7 @@ impl PrivateMessage {
     }
 
     pub fn open(
-        self,
+        mut self,
         sender_data_secret: &HashOutput,
         sender_key_source: &impl SenderKeySource,
         group_context: &GroupContext,
@@ -782,12 +786,12 @@ impl PrivateMessage {
             }
         );
 
-        let sender_data_data = self.encrypted_sender_data.open(key, nonce, &aad)?;
+        let sender_data = self.encrypted_sender_data.open(key, nonce, &aad)?;
         let SenderData {
             leaf_index,
             generation,
             reuse_guard, // TODO(RLB) Actually apply the reuse guard
-        } = SenderData::deserialize(&mut sender_data_data.as_slice())?;
+        } = sender_data;
 
         // Look up keys for the sender and generation
         let (key, nonce) = sender_key_source
@@ -805,8 +809,7 @@ impl PrivateMessage {
             }
         );
 
-        let plaintext_data = self.ciphertext.open(key, nonce, &aad)?;
-        let content = PrivateMessageContent::deserialize(&mut plaintext_data.as_slice())?;
+        let content = self.ciphertext.open(key, nonce, &aad)?;
 
         // Construct objects to return
         let tbs = FramedContentTbs {
@@ -855,7 +858,7 @@ mod test {
             let mut storage = make_storage!($signed_owned_type);
             signed.serialize(&mut storage).unwrap();
 
-            let mut reader = storage.as_slice();
+            let mut reader = SliceReader(storage.as_slice());
             let deserialized = $signed_owned_type::deserialize(&mut reader).unwrap();
 
             deserialized.verify(&signature_key).unwrap();
