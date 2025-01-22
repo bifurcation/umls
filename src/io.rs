@@ -9,7 +9,11 @@ pub trait Write {
 }
 
 pub trait Read {
+    /// Fill the buffer from the reader.  All reads are exact.
     fn read(&mut self, buf: &mut [u8]) -> Result<()>;
+
+    /// Look at the next byte without changing the stream
+    fn peek(&self) -> Result<u8>;
 }
 
 pub trait ReadRef<'a>: Sized {
@@ -44,6 +48,14 @@ impl<'a> Read for &'a [u8] {
         buf.copy_from_slice(data);
         *self = rest;
         Ok(())
+    }
+
+    fn peek(&self) -> Result<u8> {
+        if self.is_empty() {
+            return Err(Error("Insufficient data"));
+        }
+
+        Ok(self[0])
     }
 }
 

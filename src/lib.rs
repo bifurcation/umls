@@ -10,10 +10,12 @@ mod key_schedule;
 pub mod protocol;
 pub mod stack;
 pub mod syntax;
-mod syntax2;
 mod transcript_hash;
 mod tree_math;
 pub mod treekem;
+
+mod protocol2;
+mod syntax2;
 
 use crypto::*;
 use group_state::*;

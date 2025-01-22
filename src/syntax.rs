@@ -2,7 +2,6 @@ use crate::common::*;
 use crate::io::{CountWriter, ReadRef, Write};
 use crate::stack::*;
 use crate::{stack_ptr, tick};
-
 use core::convert::{TryFrom, TryInto};
 use core::marker::PhantomData;
 use heapless::Vec;
