@@ -19,6 +19,9 @@ pub trait Deserialize: Sized {
 }
 
 // Primitives
+#[derive(Serialize, Deserialize)]
+pub struct Nil;
+
 macro_rules! impl_primitive_serde {
     ($t:ty) => {
         impl Serialize for $t {
@@ -82,10 +85,10 @@ pub struct Varint(usize);
 
 impl Varint {
     pub const fn size(x: usize) -> usize {
-        match x.ilog2() {
-            0..6 => 1,
-            ..14 => 2,
-            ..30 => 4,
+        match x.checked_ilog2() {
+            None | Some(0..6) => 1,
+            Some(..14) => 2,
+            Some(..30) => 4,
             _ => panic!("invalid"),
         }
     }
@@ -162,7 +165,7 @@ impl<T: Deserialize, const N: usize> Deserialize for Vec<T, N> {
 
 // Opaque
 #[derive(Clone, PartialEq, Debug, Default)]
-struct Opaque<const N: usize>(Vec<u8, N>);
+pub struct Opaque<const N: usize>(Vec<u8, N>);
 
 impl<const N: usize> Serialize for Opaque<N> {
     const MAX_SIZE: usize = Varint::size(N) + N;
@@ -208,6 +211,10 @@ mod test {
 
     #[test]
     fn primitive() {
+        let val = Nil;
+        let enc = &hex!("");
+        serde_test(val, 0, enc);
+
         let val = 0xa0_u8;
         let enc = &hex!("a0");
         serde_test(val, 1, enc);
