@@ -8,9 +8,16 @@ pub trait Write {
     fn write(&mut self, data: &[u8]) -> Result<()>;
 }
 
-pub trait Read {
-    /// Fill the buffer from the reader.  All reads are exact.
-    fn read(&mut self, buf: &mut [u8]) -> Result<()>;
+pub trait Read: Sized {
+    /// Returns a reference to the first `n` bytes read.  Returns an error if less than `n` bytes
+    /// are available.
+    fn read(&mut self, n: usize) -> Result<&[u8]>;
+
+    /// Are there more bytes to be read?
+    fn is_empty(&self) -> bool;
+
+    /// Create a new reader for the next `n` bytes, and advance this reader past those `n` bytes.
+    fn take(&mut self, n: usize) -> Result<Self>;
 
     /// Look at the next byte without changing the stream
     fn peek(&self) -> Result<u8>;
@@ -39,15 +46,29 @@ impl<const N: usize> Write for Vec<u8, N> {
 }
 
 impl<'a> Read for &'a [u8] {
-    fn read(&mut self, buf: &mut [u8]) -> Result<()> {
-        if buf.len() > self.len() {
+    fn read(&mut self, n: usize) -> Result<&[u8]> {
+        if self.len() < n {
             return Err(Error("Insufficient data"));
         }
 
-        let (data, rest) = self.split_at(buf.len());
-        buf.copy_from_slice(data);
+        let (data, rest) = self.split_at(n);
         *self = rest;
-        Ok(())
+        Ok(data)
+    }
+
+    fn is_empty(&self) -> bool {
+        <[u8]>::is_empty(self)
+    }
+
+    // XXX(RLB) This overlaps with read(), but can't be shared because of some lifetime issues
+    fn take(&mut self, n: usize) -> Result<Self> {
+        if self.len() < n {
+            return Err(Error("Insufficient data"));
+        }
+
+        let (data, rest) = self.split_at(n);
+        *self = rest;
+        Ok(data)
     }
 
     fn peek(&self) -> Result<u8> {
