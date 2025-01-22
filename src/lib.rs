@@ -1,4 +1,4 @@
-#![no_std]
+//#![no_std]
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
@@ -10,11 +10,11 @@ mod key_schedule;
 pub mod protocol;
 pub mod stack;
 pub mod syntax;
+mod syntax2;
 mod transcript_hash;
 mod tree_math;
 pub mod treekem;
 
-use common::*;
 use crypto::*;
 use group_state::*;
 use io::SliceReader;
@@ -27,6 +27,8 @@ use treekem::*;
 use heapless::Vec;
 use rand::Rng;
 use rand_core::CryptoRngCore;
+
+pub use common::{Error, Result};
 
 pub fn make_key_package(
     rng: &mut (impl Rng + CryptoRngCore),

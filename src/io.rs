@@ -8,6 +8,10 @@ pub trait Write {
     fn write(&mut self, data: &[u8]) -> Result<()>;
 }
 
+pub trait Read {
+    fn read(&mut self, buf: &mut [u8]) -> Result<()>;
+}
+
 pub trait ReadRef<'a>: Sized {
     /// Returns a reference to the first `n` bytes read.  Returns an error if less than `n` bytes
     /// are available.
@@ -27,6 +31,19 @@ impl<const N: usize> Write for Vec<u8, N> {
     fn write(&mut self, data: &[u8]) -> Result<()> {
         self.extend_from_slice(data)
             .map_err(|_| Error("Insufficient capacity"))
+    }
+}
+
+impl<'a> Read for &'a [u8] {
+    fn read(&mut self, buf: &mut [u8]) -> Result<()> {
+        if buf.len() > self.len() {
+            return Err(Error("Insufficient data"));
+        }
+
+        let (data, rest) = self.split_at(buf.len());
+        buf.copy_from_slice(data);
+        *self = rest;
+        Ok(())
     }
 }
 

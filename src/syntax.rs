@@ -7,6 +7,8 @@ use core::convert::{TryFrom, TryInto};
 use core::marker::PhantomData;
 use heapless::Vec;
 
+pub use derive_serialize::Serialize;
+
 pub trait Serialize {
     /// The maximum size of a serialized value
     const MAX_SIZE: usize;
@@ -45,8 +47,6 @@ where
 }
 
 pub trait Deserialize<'a>: Sized {
-    /// Deserialize the provided object from the stream.  This should usually be done with "view"
-    /// or reference types, via the [ReadRef] trait.
     fn deserialize(reader: &mut impl ReadRef<'a>) -> Result<Self>;
 }
 

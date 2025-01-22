@@ -14,6 +14,8 @@ opt-level = "s"
 
 # TODO(RLB) Groom dependencies, make most of these optional, conditional on features
 [dependencies]
+derive-serialize = { path = "derive-serialize" }
+
 heapless = "0.8.0"
 hex-literal = "0.4.1"
 hex = "0.4.3"
