@@ -19,11 +19,11 @@ mod consts {
     pub const ROOT_NODE_INDEX: usize = MAX_GROUP_SIZE - 1;
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct RatchetTreePriv<C: Crypto> {
-    encryption_priv: HpkePrivateKey<C>,
-    path_secrets: Vec<Option<PathSecret<C>>, { consts::MAX_TREE_DEPTH }>,
-    commit_secret: HashOutput<C>,
+    pub encryption_priv: HpkePrivateKey<C>,
+    pub path_secrets: Vec<Option<PathSecret<C>>, { consts::MAX_TREE_DEPTH }>,
+    pub commit_secret: HashOutput<C>,
 }
 
 impl<C: Crypto> RatchetTreePriv<C> {
@@ -377,8 +377,8 @@ impl<C: Crypto> RatchetTree<C> {
         Ok(())
     }
 
-    pub fn root_hash(&self) -> Result<HashOutput<C>> {
-        self.hash(self.size().root())
+    pub fn root_hash(&self) -> Result<TreeHash<C>> {
+        self.hash(self.size().root()).map(|h| TreeHash(h))
     }
 
     fn hash(&self, index: NodeIndex) -> Result<HashOutput<C>> {

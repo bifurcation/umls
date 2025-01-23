@@ -73,6 +73,9 @@ pub struct MemberSecret<C: Crypto>(HashOutput<C>);
 #[derive(Clone, Default, PartialEq, Debug)]
 pub struct WelcomeSecret<C: Crypto>(HashOutput<C>);
 
+#[derive(Clone, Default, PartialEq, Debug)]
+pub struct EpochAuthenticator<C: Crypto>(HashOutput<C>);
+
 impl<C: Crypto> EpochSecret<C> {
     pub fn new(rng: &mut (impl Rng + CryptoRngCore)) -> Self {
         // TODO Self(HashOutput(Opaque::random(rng)))
@@ -97,21 +100,21 @@ impl<C: Crypto> EpochSecret<C> {
     pub fn confirmation_tag(
         &self,
         confirmed_transcript_hash: &ConfirmedTranscriptHash<C>,
-    ) -> HashOutput<C> {
+    ) -> ConfirmationTag<C> {
         let confirmation_key = C::derive_secret(&self.0, b"confirm");
 
-        C::hmac(
+        ConfirmationTag(C::hmac(
             confirmation_key.as_ref(),
             confirmed_transcript_hash.0.as_ref(),
-        )
+        ))
     }
 
-    pub fn epoch_authenticator(&self) -> HashOutput<C> {
-        C::derive_secret(&self.0, b"authentication")
+    pub fn epoch_authenticator(&self) -> EpochAuthenticator<C> {
+        EpochAuthenticator(C::derive_secret(&self.0, b"authentication"))
     }
 
-    pub fn sender_data_secret(&self) -> HashOutput<C> {
-        C::derive_secret(&self.0, b"sender data")
+    pub fn sender_data_secret(&self) -> SenderDataSecret<C> {
+        SenderDataSecret(C::derive_secret(&self.0, b"sender data"))
     }
 
     // XXX(RLB) This can be done immutably because we only ever derive one secret per epoch

@@ -1,5 +1,6 @@
 use crate::common::*;
 use crate::io::*;
+use crate::protocol2::CipherSuite;
 use crate::syntax2::*;
 
 use aead::Buffer;
@@ -20,7 +21,9 @@ pub trait Hmac: Write {
     fn finalize(self) -> Self::Output;
 }
 
-pub trait Crypto: Clone + PartialEq + Debug {
+pub trait Crypto: Clone + PartialEq + Default + Debug {
+    const CIPHER_SUITE: CipherSuite;
+
     type Hash: Hash<Output = Self::HashOutput>;
     type Hmac: Hmac<Output = Self::HashOutput>;
 
@@ -157,6 +160,7 @@ pub trait Crypto: Clone + PartialEq + Debug {
         generation: u32,
     ) -> (Self::AeadKey, Self::AeadNonce);
     fn welcome_key_nonce(secret: &Self::HashOutput) -> (Self::AeadKey, Self::AeadNonce);
+    fn hash_ref(label: &'static [u8], value: &impl Serialize) -> Result<Self::HashOutput>;
 }
 
 pub type RawHashOutput<C> = <C as Crypto>::RawHashOutput;

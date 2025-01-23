@@ -8,13 +8,13 @@ use crate::syntax2::*;
 pub struct InterimTranscriptHash<C: Crypto>(HashOutput<C>);
 
 pub fn confirmed<C: Crypto>(
-    interim_transcript_hash: &HashOutput<C>,
+    interim_transcript_hash: &InterimTranscriptHash<C>,
     content: &FramedContent<C>,
     signature: &Signature<C>,
 ) -> Result<ConfirmedTranscriptHash<C>> {
     let mut h = C::Hash::default();
 
-    h.write(interim_transcript_hash.as_ref())?;
+    h.write(interim_transcript_hash.0.as_ref())?;
     protocol2::consts::SUPPORTED_WIRE_FORMAT.serialize(&mut h)?;
     content.serialize(&mut h)?;
     signature.serialize(&mut h)?;
@@ -24,7 +24,7 @@ pub fn confirmed<C: Crypto>(
 
 pub fn interim<C: Crypto>(
     confirmed_transcript_hash: &ConfirmedTranscriptHash<C>,
-    confirmation_tag: &HashOutput<C>,
+    confirmation_tag: &ConfirmationTag<C>,
 ) -> Result<InterimTranscriptHash<C>> {
     let mut h = C::Hash::default();
 

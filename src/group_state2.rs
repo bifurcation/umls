@@ -8,21 +8,21 @@ use crate::transcript_hash2::InterimTranscriptHash;
 use crate::treekem2::*;
 
 #[derive(Serialize, Deserialize)]
-struct GroupState<C: Crypto> {
+pub struct GroupState<C: Crypto> {
     // Shared state
-    ratchet_tree: RatchetTree<C>,
-    group_context: GroupContext<C>,
-    interim_transcript_hash: InterimTranscriptHash<C>,
-    epoch_secret: EpochSecret<C>,
+    pub ratchet_tree: RatchetTree<C>,
+    pub group_context: GroupContext<C>,
+    pub interim_transcript_hash: InterimTranscriptHash<C>,
+    pub epoch_secret: EpochSecret<C>,
 
     // Local state
-    my_index: LeafIndex,
-    my_signature_priv: SignaturePrivateKey<C>,
-    my_ratchet_tree_priv: RatchetTreePriv<C>,
+    pub my_index: LeafIndex,
+    pub my_signature_priv: SignaturePrivateKey<C>,
+    pub my_ratchet_tree_priv: RatchetTreePriv<C>,
 }
 
 impl<C: Crypto> GroupState<C> {
-    pub fn epoch_authenticator(&self) -> HashOutput<C> {
+    pub fn epoch_authenticator(&self) -> EpochAuthenticator<C> {
         self.epoch_secret.epoch_authenticator()
     }
 }
