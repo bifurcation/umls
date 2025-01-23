@@ -76,6 +76,10 @@ impl Default for ProtocolVersion {
 #[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct CipherSuite(u16);
 
+// https://www.iana.org/assignments/mls/mls.xhtml#mls-ciphersuites
+pub const X25519_AES128GCM_SHA256_ED25519: CipherSuite = CipherSuite(0x0001);
+pub const P256_AES128GCM_SHA256_P256: CipherSuite = CipherSuite(0x0002);
+
 #[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct ExtensionType(u16);
 

@@ -1,7 +1,6 @@
 use crate::common::*;
 use crate::crypto2::*;
 use crate::group_state2::*;
-use crate::io::*;
 use crate::key_schedule2::*;
 use crate::protocol2::{self, *};
 use crate::syntax2::*;

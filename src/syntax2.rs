@@ -208,6 +208,21 @@ impl<T: Deserialize, const N: usize> Deserialize for Vec<T, N> {
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Raw<const N: usize>(pub Vec<u8, N>);
 
+impl<const N: usize> AsRef<[u8]> for Raw<N> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl<'a, const N: usize> TryFrom<&'a [u8]> for Raw<N> {
+    type Error = Error;
+
+    fn try_from(val: &[u8]) -> Result<Self> {
+        let vec = Vec::try_from(val).map_err(|_| Error("Size error"))?;
+        Ok(Self(vec))
+    }
+}
+
 impl<const N: usize> Serialize for Raw<N> {
     const MAX_SIZE: usize = N;
 
@@ -226,6 +241,21 @@ impl<const N: usize> Deserialize for Raw<N> {
 // Opaque
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Opaque<const N: usize>(pub Vec<u8, N>);
+
+impl<const N: usize> AsRef<[u8]> for Opaque<N> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl<'a, const N: usize> TryFrom<&'a [u8]> for Opaque<N> {
+    type Error = Error;
+
+    fn try_from(val: &[u8]) -> Result<Self> {
+        let vec = Vec::try_from(val).map_err(|_| Error("Size error"))?;
+        Ok(Self(vec))
+    }
+}
 
 impl<const N: usize> Serialize for Opaque<N> {
     const MAX_SIZE: usize = Varint::size(N) + N;
