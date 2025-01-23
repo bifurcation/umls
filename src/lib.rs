@@ -17,6 +17,8 @@ pub mod treekem;
 mod crypto2;
 mod protocol2;
 mod syntax2;
+mod tree_math2;
+mod treekem2;
 
 use crypto::*;
 use group_state::*;

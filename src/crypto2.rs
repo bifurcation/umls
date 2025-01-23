@@ -3,17 +3,44 @@ use crate::io::*;
 use crate::syntax2::*;
 
 use aead::Buffer;
+use core::fmt::Debug;
 use rand_core::CryptoRngCore;
 
-pub trait Crypto: Clone {
-    type RawHashOutput: Clone + Serialize + Deserialize;
-    type HashOutput: Clone + Serialize + Deserialize;
+pub trait Hash: Default + Write {
+    type Output;
 
-    type HpkePrivateKey: Clone + Serialize + Deserialize;
-    type HpkePublicKey: Clone + Serialize + Deserialize;
-    type HpkeKemOutput: Clone + Serialize + Deserialize;
-    type HpkeKemSecret: Clone + Serialize + Deserialize;
+    fn finalize(self) -> Self::Output;
+}
 
+pub trait Crypto: Clone + PartialEq + Debug {
+    type Hash: Hash<Output = Self::HashOutput>;
+
+    type RawHashOutput: Clone
+        + Debug
+        + PartialEq
+        + Serialize
+        + Deserialize
+        + for<'a> TryFrom<&'a [u8]>
+        + AsRef<[u8]>;
+    type HashOutput: Default
+        + Clone
+        + Debug
+        + PartialEq
+        + Serialize
+        + Deserialize
+        + for<'a> TryFrom<&'a [u8]>
+        + AsRef<[u8]>;
+
+    type HpkePrivateKey: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
+    type HpkePublicKey: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
+    type HpkeKemOutput: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
+    type HpkeKemSecret: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
+
+    fn hpke_generate(
+        rng: &mut impl CryptoRngCore,
+    ) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)>;
+    fn hpke_derive(seed: &Self::HashOutput) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)>;
+    fn hpke_priv_to_pub(encryption_priv: &Self::HpkePrivateKey) -> Self::HpkePublicKey;
     fn hpke_encap(
         rng: &mut impl CryptoRngCore,
         encryption_key: &Self::HpkePublicKey,
@@ -24,9 +51,9 @@ pub trait Crypto: Clone {
     ) -> Self::HpkeKemSecret;
     fn hpke_key_nonce(secret: Self::HpkeKemSecret) -> (Self::AeadKey, Self::AeadNonce);
 
-    type SignaturePrivateKey: Serialize + Deserialize;
-    type SignaturePublicKey: Serialize + Deserialize;
-    type Signature: Serialize + Deserialize;
+    type SignaturePrivateKey: Clone + Debug + PartialEq + Serialize + Deserialize;
+    type SignaturePublicKey: Clone + Debug + PartialEq + Serialize + Deserialize;
+    type Signature: Clone + Debug + PartialEq + Serialize + Deserialize;
 
     fn sign_with_label(
         tbs: &impl Serialize,
@@ -66,11 +93,49 @@ pub trait Crypto: Clone {
     // manage them.  They should basically be:
     //
     //    EncryptedT = Opaque<{ T::MAX_SIZE + C::AEAD_OVERHEAD }>
-    type EncryptedGroupSecrets: Default + Read + Write + Serialize + Deserialize + Buffer;
-    type EncryptedGroupInfo: Default + Read + Write + Serialize + Deserialize + Buffer;
-    type EncryptedPathSecret: Default + Read + Write + Serialize + Deserialize + Buffer;
-    type EncryptedSenderData: Default + Read + Write + Serialize + Deserialize + Buffer;
-    type EncryptedPrivateMessageContent: Default + Read + Write + Serialize + Deserialize + Buffer;
+    type EncryptedGroupSecrets: Clone
+        + Default
+        + Debug
+        + Read
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+    type EncryptedGroupInfo: Clone
+        + Default
+        + Debug
+        + Read
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+    type EncryptedPathSecret: Clone
+        + Default
+        + Debug
+        + Read
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+    type EncryptedSenderData: Clone
+        + Default
+        + Debug
+        + Read
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+    type EncryptedPrivateMessageContent: Clone
+        + Default
+        + Debug
+        + Read
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+
+    // XXX(RLB) These can probably be provided based on the above
+    fn derive_secret(secret: &Self::HashOutput, label: &'static [u8]) -> Self::HashOutput;
 }
 
 pub type RawHashOutput<C> = <C as Crypto>::RawHashOutput;
@@ -89,7 +154,7 @@ pub type EncryptedPathSecret<C> = <C as Crypto>::EncryptedPathSecret;
 pub type EncryptedSenderData<C> = <C as Crypto>::EncryptedSenderData;
 pub type EncryptedPrivateMessageContent<C> = <C as Crypto>::EncryptedPrivateMessageContent;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Signed<T: Serialize + Deserialize, C: Crypto> {
     pub tbs: T,
     pub signature: Signature<C>,
@@ -110,6 +175,11 @@ where
         Ok(Self { tbs, signature })
     }
 
+    pub fn re_sign(&mut self, sig_priv: &C::SignaturePrivateKey) -> Result<()> {
+        self.signature = C::sign_with_label(&self.tbs, Self::SIGNATURE_LABEL, sig_priv)?;
+        Ok(())
+    }
+
     pub fn verify(&self, sig_key: &C::SignaturePublicKey) -> Result<()> {
         C::verify_with_label(&self.tbs, Self::SIGNATURE_LABEL, &self.signature, sig_key)
     }
@@ -120,7 +190,7 @@ where
     C: Crypto,
     E: Default + Read + Write + Buffer,
 {
-    fn seal(self, key: &AeadKey<C>, nonce: &AeadNonce<C>, aad: &[u8]) -> Result<E> {
+    fn seal(&self, key: &AeadKey<C>, nonce: &AeadNonce<C>, aad: &[u8]) -> Result<E> {
         let mut buf = E::default();
         self.serialize(&mut buf)?;
         C::seal(&mut buf, key, nonce, aad)?;
@@ -133,11 +203,11 @@ where
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct HpkeCiphertext<C, E>
 where
     C: Crypto,
-    E: Serialize + Deserialize,
+    E: Clone + Serialize + Deserialize,
 {
     kem_output: HpkeKemOutput<C>,
     ciphertext: E,
@@ -146,10 +216,10 @@ where
 pub trait HpkeEncrypt<C, E>: AeadEncrypt<C, E>
 where
     C: Crypto,
-    E: Default + Read + Write + Serialize + Deserialize + Buffer,
+    E: Clone + Default + Read + Write + Serialize + Deserialize + Buffer,
 {
     fn hpke_seal(
-        self,
+        &self,
         rng: &mut impl CryptoRngCore,
         encryption_key: &HpkePublicKey<C>,
         aad: &[u8],
@@ -172,4 +242,12 @@ where
         let (key, nonce) = C::hpke_key_nonce(kem_secret);
         Self::open(ct.ciphertext, &key, &nonce, aad)
     }
+}
+
+impl<T, C, E> HpkeEncrypt<C, E> for T
+where
+    T: AeadEncrypt<C, E>,
+    C: Crypto,
+    E: Clone + Default + Read + Write + Serialize + Deserialize + Buffer,
+{
 }

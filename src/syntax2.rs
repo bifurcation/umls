@@ -122,7 +122,7 @@ impl<const N: usize> Deserialize for [u8; N] {
 
 // Varint
 #[derive(Copy, Clone, PartialEq, Debug, Default)]
-pub struct Varint(usize);
+pub struct Varint(pub usize);
 
 impl Varint {
     pub const fn size(x: usize) -> usize {

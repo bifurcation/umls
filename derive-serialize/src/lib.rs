@@ -27,11 +27,19 @@ pub fn derive_serialize(input: proc_macro::TokenStream) -> proc_macro::TokenStre
     proc_macro::TokenStream::from(expanded)
 }
 
+// derive(Materialize) only works in limited circumstances.  If an object has a generic type
+// parameter, then we can't compute its size in a way that is compatible with const generics.
+// Generic lifetime parameters are fine.
 #[proc_macro_derive(Materialize)]
 pub fn derive_materialize(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
     let name = input.ident;
+
+    if input.generics.type_params().count() > 0 {
+        panic!("derive(Materialize) is not compatible with generic parameters");
+    }
+
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
     let expanded = quote! {
