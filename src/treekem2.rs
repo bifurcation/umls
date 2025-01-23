@@ -19,7 +19,7 @@ mod consts {
     pub const ROOT_NODE_INDEX: usize = MAX_GROUP_SIZE - 1;
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct RatchetTreePriv<C: Crypto> {
     pub encryption_priv: HpkePrivateKey<C>,
     pub path_secrets: Vec<Option<PathSecret<C>>, { consts::MAX_TREE_DEPTH }>,

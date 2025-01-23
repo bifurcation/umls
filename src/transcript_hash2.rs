@@ -4,7 +4,7 @@ use crate::io::*;
 use crate::protocol2::{self, *};
 use crate::syntax2::*;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct InterimTranscriptHash<C: Crypto>(HashOutput<C>);
 
 pub fn confirmed<C: Crypto>(

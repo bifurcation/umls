@@ -10,7 +10,7 @@ stack_measurement = []
 default = ["x25519_aes128gcm_ed25519", "rust_crypto", "stack_measurement"]
 
 [profile.dev]
-opt-level = "s"
+#opt-level = "s"
 
 # TODO(RLB) Groom dependencies, make most of these optional, conditional on features
 [dependencies]

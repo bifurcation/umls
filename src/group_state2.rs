@@ -7,7 +7,7 @@ use crate::syntax2::*;
 use crate::transcript_hash2::InterimTranscriptHash;
 use crate::treekem2::*;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GroupState<C: Crypto> {
     // Shared state
     pub ratchet_tree: RatchetTree<C>,

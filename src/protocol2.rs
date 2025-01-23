@@ -27,13 +27,13 @@ pub mod consts {
     pub const MAX_KEY_PACKAGE_EXTENSION_LEN: usize = 0;
 
     // GroupContext
-    pub const MAX_GROUP_ID_SIZE: usize = 16;
+    pub const MAX_GROUP_ID_SIZE: usize = 32;
     pub const MAX_GROUP_CONTEXT_EXTENSIONS: usize = 0;
     pub const MAX_GROUP_CONTEXT_EXTENSION_LEN: usize = 0;
 
     // GroupInfo
-    pub const MAX_GROUP_INFO_EXTENSIONS: usize = 0;
-    pub const MAX_GROUP_INFO_EXTENSION_LEN: usize = 0;
+    pub const MAX_GROUP_INFO_EXTENSIONS: usize = 1;
+    pub const MAX_GROUP_INFO_EXTENSION_LEN: usize = 10000;
 
     // Welcome
     pub const MAX_JOINERS_PER_WELCOME: usize = 1;
@@ -55,7 +55,7 @@ pub mod consts {
 }
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct BasicCredential(Opaque<{ consts::MAX_CREDENTIALS_SIZE }>);
+pub struct BasicCredential(pub Opaque<{ consts::MAX_CREDENTIALS_SIZE }>);
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 #[discriminant = "u8"]
@@ -180,32 +180,32 @@ impl<C: Crypto> SignatureLabel for KeyPackage<C> {
     const SIGNATURE_LABEL: &[u8] = b"KeyPackageTBS";
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct KeyPackagePriv<C: Crypto> {
     pub init_priv: HpkePrivateKey<C>,
     pub encryption_priv: HpkePrivateKey<C>,
     pub signature_priv: SignaturePrivateKey<C>,
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct GroupId(Opaque<{ consts::MAX_GROUP_ID_SIZE }>);
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct GroupId(pub Opaque<{ consts::MAX_GROUP_ID_SIZE }>);
 
 #[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Epoch(pub u64);
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct TreeHash<C: Crypto>(pub HashOutput<C>);
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct ConfirmedTranscriptHash<C: Crypto>(pub HashOutput<C>);
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GroupContextExtension {
     pub extension_type: ExtensionType,
     pub extension_data: Opaque<{ consts::MAX_GROUP_CONTEXT_EXTENSION_LEN }>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GroupContext<C: Crypto> {
     pub version: ProtocolVersion,
     pub cipher_suite: CipherSuite,
@@ -264,7 +264,7 @@ impl<C: Crypto> AeadEncrypt<C, EncryptedGroupInfo<C>> for GroupInfo<C> {}
 #[derive(Serialize, Deserialize)]
 pub struct JoinerSecret<C: Crypto>(pub HashOutput<C>);
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PathSecret<C: Crypto>(pub HashOutput<C>);
 
 #[derive(Serialize, Deserialize)]
@@ -362,7 +362,7 @@ pub enum MessageContent<C: Crypto> {
     Commit(Commit<C>),
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct PrivateMessageAad(Opaque<{ consts::MAX_PRIVATE_MESSAGE_AAD_LEN }>);
 
 #[derive(Serialize, Deserialize)]
@@ -404,7 +404,7 @@ pub struct Generation(pub u32);
 #[derive(Serialize, Deserialize)]
 pub struct ReuseGuard(pub [u8; 4]);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Copy, Clone, Serialize, Deserialize)]
 struct ContentType(u8);
 
 const CONTENT_TYPE_COMMIT: ContentType = ContentType(3);
@@ -444,7 +444,7 @@ struct PrivateMessageContent<C: Crypto> {
 
 impl<C: Crypto> AeadEncrypt<C, EncryptedPrivateMessageContent<C>> for PrivateMessageContent<C> {}
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PrivateMessage<C: Crypto> {
     group_id: GroupId,
     epoch: Epoch,

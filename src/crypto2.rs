@@ -844,10 +844,12 @@ pub mod test {
             Ok(())
         }
 
-        type EncryptedGroupSecrets = BufferVec<0>;
-        type EncryptedGroupInfo = BufferVec<0>;
-        type EncryptedPathSecret = BufferVec<0>;
-        type EncryptedSenderData = BufferVec<0>;
-        type EncryptedPrivateMessageContent = BufferVec<0>;
+        // XXX(RLB) These numbers are wildly over-sized.  But it saves us having to actually
+        // compute them.
+        type EncryptedGroupSecrets = BufferVec<1000>;
+        type EncryptedGroupInfo = BufferVec<10000>;
+        type EncryptedPathSecret = BufferVec<100>;
+        type EncryptedSenderData = BufferVec<100>;
+        type EncryptedPrivateMessageContent = BufferVec<10000>;
     }
 }

@@ -520,24 +520,29 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
     }
 }
 
-/*
 #[cfg(test)]
 mod test {
     use super::*;
 
+    use crate::crypto2::test::RustCryptoX25519;
     use rand::{seq::SliceRandom, SeedableRng};
 
     fn make_user(
         rng: &mut (impl CryptoRngCore + Rng),
         name: &[u8],
-    ) -> (KeyPackagePriv, KeyPackage) {
-        let (sig_priv, sig_key) = C::generate_sig(rng).unwrap();
-        let credential = Credential::from(b"alice".as_slice());
+    ) -> (
+        KeyPackagePriv<RustCryptoX25519>,
+        KeyPackage<RustCryptoX25519>,
+    ) {
+        let (sig_priv, sig_key) = RustCryptoX25519::sig_generate(rng).unwrap();
+        let credential = Credential::Basic(BasicCredential(
+            Opaque::try_from(b"alice".as_slice()).unwrap(),
+        ));
         make_key_package(rng, sig_priv, sig_key, credential).unwrap()
     }
 
     struct TestGroup {
-        states: Vec<Option<GroupState>, 10>,
+        states: Vec<Option<GroupState<RustCryptoX25519>>, 10>,
         op_count: u64,
     }
 
@@ -545,7 +550,7 @@ mod test {
         fn new(group_id: &[u8], creator_name: &[u8]) -> Self {
             let mut rng = rand::thread_rng();
 
-            let group_id = GroupId::from(Opaque::try_from(group_id).unwrap());
+            let group_id = GroupId(Opaque::try_from(group_id).unwrap());
 
             let (kp_priv, kp) = make_user(&mut rng, creator_name);
             let state = GroupState::create(&mut rng, kp_priv, kp, group_id).unwrap();
@@ -566,7 +571,7 @@ mod test {
 
             let mut committer_state = self.states[committer].take().unwrap();
             let (commit, welcome) = committer_state.send_commit(&mut rng, op).unwrap();
-            let joiner_state = GroupState::join(kp_priv, kp, &mut welcome.unwrap()).unwrap();
+            let joiner_state = GroupState::join(kp_priv, kp, welcome.unwrap()).unwrap();
 
             // Everyone in the group handles the commit (note that committer is currently None)
             for state in self.states.iter_mut().filter_map(|s| s.as_mut()) {
@@ -732,4 +737,3 @@ mod test {
         }
     }
 }
-*/
