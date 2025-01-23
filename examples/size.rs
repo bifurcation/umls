@@ -18,6 +18,7 @@ fn type_info<T: Serialize>() -> TypeInfo {
 }
 
 fn main() {
+    /*
     let data = vec![
         type_info::<SignaturePrivateKey>(),
         type_info::<SignaturePublicKey>(),
@@ -36,4 +37,5 @@ fn main() {
     table.with(Style::modern());
 
     println!("{}", table);
+    */
 }

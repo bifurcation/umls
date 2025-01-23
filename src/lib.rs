@@ -14,6 +14,7 @@ mod transcript_hash;
 mod tree_math;
 pub mod treekem;
 
+mod crypto2;
 mod protocol2;
 mod syntax2;
 
