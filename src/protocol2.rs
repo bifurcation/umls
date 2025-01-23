@@ -706,18 +706,3 @@ pub trait SenderKeySource<C: Crypto> {
         generation: Generation,
     ) -> Option<(AeadKey<C>, AeadNonce<C>)>;
 }
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn encrypted() {
-        let _x = EncryptedThing::default();
-    }
-
-    #[test]
-    fn signed() {
-        // TODO
-    }
-}

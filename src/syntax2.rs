@@ -43,7 +43,7 @@ where
 }
 
 // Primitives
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct Nil;
 
 macro_rules! impl_primitive_serde {
