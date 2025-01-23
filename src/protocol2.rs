@@ -167,7 +167,7 @@ pub struct Epoch(u64);
 pub struct TreeHash<C: Crypto>(HashOutput<C>);
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct ConfirmedTranscriptHash<C: Crypto>(HashOutput<C>);
+pub struct ConfirmedTranscriptHash<C: Crypto>(pub HashOutput<C>);
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct GroupContextExtension {
@@ -229,7 +229,7 @@ impl<C: Crypto> SignatureLabel for GroupInfo<C> {
 }
 
 #[derive(Serialize, Deserialize)]
-struct JoinerSecret<C: Crypto>(pub HashOutput<C>);
+pub struct JoinerSecret<C: Crypto>(pub HashOutput<C>);
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PathSecret<C: Crypto>(pub HashOutput<C>);
@@ -292,7 +292,7 @@ pub struct Remove {
 
 #[derive(Serialize, Deserialize)]
 #[discriminant = "u16"]
-enum Proposal<C: Crypto> {
+pub enum Proposal<C: Crypto> {
     #[discriminant = "1"]
     Add(Add<C>),
 
@@ -302,27 +302,27 @@ enum Proposal<C: Crypto> {
 
 #[derive(Serialize, Deserialize)]
 #[discriminant = "u8"]
-enum ProposalOrRef<C: Crypto> {
+pub enum ProposalOrRef<C: Crypto> {
     #[discriminant = "1"]
     Proposal(Proposal<C>),
 }
 
 #[derive(Serialize, Deserialize)]
-struct Commit<C: Crypto> {
+pub struct Commit<C: Crypto> {
     proposals: Vec<ProposalOrRef<C>, { consts::MAX_PROPOSALS_PER_COMMIT }>,
     path: Option<UpdatePath<C>>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[discriminant = "u8"]
-enum Sender {
+pub enum Sender {
     #[discriminant = "1"]
     Member(LeafIndex),
 }
 
 #[derive(Serialize, Deserialize)]
 #[discriminant = "u8"]
-enum MessageContent<C: Crypto> {
+pub enum MessageContent<C: Crypto> {
     #[discriminant = "3"]
     Commit(Commit<C>),
 }
@@ -331,7 +331,7 @@ enum MessageContent<C: Crypto> {
 struct PrivateMessageAad(Opaque<{ consts::MAX_PRIVATE_MESSAGE_AAD_LEN }>);
 
 #[derive(Serialize, Deserialize)]
-struct FramedContent<C: Crypto> {
+pub struct FramedContent<C: Crypto> {
     group_id: GroupId,
     epoch: Epoch,
     sender: Sender,
@@ -344,7 +344,7 @@ pub struct WireFormat(u16);
 
 #[derive(Serialize, Deserialize)]
 #[discriminant = "u8"]
-enum FramedContentBinder<C: Crypto> {
+pub enum FramedContentBinder<C: Crypto> {
     #[discriminant = "1"]
     Member(GroupContext<C>),
 }
@@ -363,8 +363,8 @@ impl<C: Crypto> SignatureLabel for SignedFramedContent<C> {
     const SIGNATURE_LABEL: &[u8] = b"FramedContentTBS";
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Generation(u32);
+#[derive(PartialEq, Serialize, Deserialize)]
+pub struct Generation(pub u32);
 
 #[derive(Serialize, Deserialize)]
 struct ReuseGuard([u8; 4]);

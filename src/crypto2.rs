@@ -12,8 +12,17 @@ pub trait Hash: Default + Write {
     fn finalize(self) -> Self::Output;
 }
 
+pub trait Hmac: Write {
+    type Key;
+    type Output;
+
+    fn new(key: &[u8]) -> Self;
+    fn finalize(self) -> Self::Output;
+}
+
 pub trait Crypto: Clone + PartialEq + Debug {
     type Hash: Hash<Output = Self::HashOutput>;
+    type Hmac: Hmac<Output = Self::HashOutput>;
 
     type RawHashOutput: Clone
         + Debug
@@ -135,7 +144,19 @@ pub trait Crypto: Clone + PartialEq + Debug {
         + Buffer;
 
     // XXX(RLB) These can probably be provided based on the above
+    fn hmac(key: &[u8], data: &[u8]) -> Self::HashOutput;
     fn derive_secret(secret: &Self::HashOutput, label: &'static [u8]) -> Self::HashOutput;
+    fn extract(salt: &Self::HashOutput, ikm: &Self::HashOutput) -> Self::HashOutput;
+    fn expand_with_label(
+        secret: &Self::HashOutput,
+        label: &'static [u8],
+        context: &[u8],
+    ) -> Self::HashOutput;
+    fn tree_key_nonce(
+        secret: &Self::HashOutput,
+        generation: u32,
+    ) -> (Self::AeadKey, Self::AeadNonce);
+    fn welcome_key_nonce(secret: &Self::HashOutput) -> (Self::AeadKey, Self::AeadNonce);
 }
 
 pub type RawHashOutput<C> = <C as Crypto>::RawHashOutput;
