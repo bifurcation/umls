@@ -6,14 +6,14 @@ use aead::Buffer;
 use heapless::Vec;
 use rand_core::CryptoRngCore;
 
-trait Crypto {
-    type RawHashOutput: Serialize + Deserialize;
-    type HashOutput: Serialize + Deserialize;
+pub trait Crypto: Clone {
+    type RawHashOutput: Clone + Serialize + Deserialize;
+    type HashOutput: Clone + Serialize + Deserialize;
 
-    type HpkePrivateKey: Serialize + Deserialize;
-    type HpkePublicKey: Serialize + Deserialize;
-    type HpkeKemOutput: Serialize + Deserialize;
-    type HpkeKemSecret: Serialize + Deserialize;
+    type HpkePrivateKey: Clone + Serialize + Deserialize;
+    type HpkePublicKey: Clone + Serialize + Deserialize;
+    type HpkeKemOutput: Clone + Serialize + Deserialize;
+    type HpkeKemSecret: Clone + Serialize + Deserialize;
 
     fn hpke_encap(
         rng: &mut impl CryptoRngCore,
@@ -56,6 +56,11 @@ trait Crypto {
         nonce: &Self::AeadNonce,
         aad: &[u8],
     ) -> Result<()>;
+
+    fn sender_data_key_nonce(
+        sender_data_secret: &Self::HashOutput,
+        ciphertext: &[u8],
+    ) -> (Self::AeadKey, Self::AeadNonce);
 
     // XXX(RLB): These constants are unfortunately needed due to the limitations on const generics.
     // We might need to arrange them separately (e.g., in a separate trait) to make it easier to
@@ -171,6 +176,8 @@ where
 }
 
 mod consts {
+    use super::{CredentialType, ExtensionType, ProtocolVersion, WireFormat};
+
     // Credentials
     pub const MAX_CREDENTIALS_SIZE: usize = 32;
 
@@ -205,12 +212,16 @@ mod consts {
     pub const MAX_GROUP_SIZE: usize = 8;
     pub const MAX_RESOLUTION_SIZE: usize = MAX_GROUP_SIZE / 2;
     pub const MAX_TREE_DEPTH: usize = (MAX_GROUP_SIZE.ilog2() as usize) + 1;
+    pub const EXTENSION_TYPE_RATCHET_TREE: ExtensionType = ExtensionType(0x0002);
 
     // Commit
     pub const MAX_PROPOSALS_PER_COMMIT: usize = 1;
 
     // PrivateMessage
     pub const MAX_PRIVATE_MESSAGE_AAD_LEN: usize = 0;
+    pub const SUPPORTED_VERSION: ProtocolVersion = ProtocolVersion(0x0001); // mls10
+    pub const SUPPORTED_CREDENTIAL_TYPE: CredentialType = CredentialType(0x0001); // basic
+    pub const SUPPORTED_WIRE_FORMAT: WireFormat = WireFormat(0x0002); // mls_private_message
 }
 
 #[derive(Serialize, Deserialize)]
@@ -223,19 +234,19 @@ enum Credential {
     Basic(BasicCredential),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 struct ProtocolVersion(u16);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 struct CipherSuite(u16);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 struct ExtensionType(u16);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 struct ProposalType(u16);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 struct CredentialType(u16);
 
 #[derive(Serialize, Deserialize)]
@@ -316,25 +327,25 @@ struct KeyPackagePriv<C: Crypto> {
     signature_priv: SignaturePrivateKey<C>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 struct GroupId(Opaque<{ consts::MAX_GROUP_ID_SIZE }>);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
 struct Epoch(u64);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct TreeHash<C: Crypto>(HashOutput<C>);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct ConfirmedTranscriptHash<C: Crypto>(HashOutput<C>);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct GroupContextExtension {
     extension_type: ExtensionType,
     extension_data: Opaque<{ consts::MAX_GROUP_CONTEXT_EXTENSION_LEN }>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct GroupContext<C: Crypto> {
     version: ProtocolVersion,
     cipher_suite: CipherSuite,
@@ -345,8 +356,8 @@ struct GroupContext<C: Crypto> {
     extensions: Vec<GroupContextExtension, { consts::MAX_GROUP_CONTEXT_EXTENSIONS }>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct LeafIndex(u32);
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct LeafIndex(u32);
 
 #[derive(Serialize, Deserialize)]
 struct ConfirmationTag<C: Crypto>(HashOutput<C>);
@@ -507,7 +518,7 @@ impl<C: Crypto> SignatureLabel for SignedFramedContent<C> {
 }
 
 #[derive(Serialize, Deserialize)]
-struct Generation(u32);
+pub struct Generation(u32);
 
 #[derive(Serialize, Deserialize)]
 struct ReuseGuard([u8; 4]);
@@ -517,7 +528,9 @@ struct ContentType(u8);
 
 const CONTENT_TYPE_COMMIT: ContentType = ContentType(3);
 
-#[derive(Serialize)]
+struct SenderDataSecret<C: Crypto>(HashOutput<C>);
+
+#[derive(Serialize, Materialize)]
 struct SenderDataAad<'a> {
     group_id: &'a GroupId,
     epoch: Epoch,
@@ -533,7 +546,7 @@ struct SenderData {
 
 impl<C: Crypto> AeadEncrypt<C, EncryptedSenderData<C>> for SenderData {}
 
-#[derive(Serialize)]
+#[derive(Serialize, Materialize)]
 struct PrivateMessageContentAad<'a> {
     group_id: &'a GroupId,
     epoch: Epoch,
@@ -558,6 +571,140 @@ struct PrivateMessage<C: Crypto> {
     authenticated_data: PrivateMessageAad,
     encrypted_sender_data: EncryptedSenderData<C>,
     ciphertext: EncryptedPrivateMessageContent<C>,
+}
+
+impl<C: Crypto> PrivateMessage<C> {
+    pub fn new(
+        signed_framed_content: SignedFramedContent<C>,
+        confirmation_tag: ConfirmationTag<C>,
+        sender_data: SenderData,
+        key: AeadKey<C>,
+        nonce: AeadNonce<C>,
+        sender_data_secret: &SenderDataSecret<C>,
+        authenticated_data: PrivateMessageAad,
+    ) -> Result<Self> {
+        // Form payload
+        let MessageContent::Commit(commit) = signed_framed_content.tbs.content.content;
+        let signature = signed_framed_content.signature;
+        let plaintext = PrivateMessageContent {
+            commit,
+            signature,
+            confirmation_tag,
+        };
+
+        // Encrypt payload
+        let group_id = signed_framed_content.tbs.content.group_id;
+        let epoch = signed_framed_content.tbs.content.epoch;
+        let aad = PrivateMessageContentAad {
+            group_id: &group_id,
+            epoch,
+            content_type: CONTENT_TYPE_COMMIT,
+            authenticated_data: &authenticated_data,
+        }
+        .materialize()?;
+
+        let ciphertext = plaintext.seal(&key, &nonce, &aad)?;
+
+        // Encrypt sender data
+        let (key, nonce) = C::sender_data_key_nonce(&sender_data_secret.0, ciphertext.as_ref());
+        let aad = SenderDataAad {
+            group_id: &group_id,
+            epoch,
+            content_type: CONTENT_TYPE_COMMIT,
+        }
+        .materialize()?;
+
+        let encrypted_sender_data = AeadEncrypt::<C, _>::seal(sender_data, &key, &nonce, &aad)?;
+
+        Ok(Self {
+            group_id,
+            epoch,
+            content_type: CONTENT_TYPE_COMMIT,
+            authenticated_data,
+            encrypted_sender_data,
+            ciphertext,
+        })
+    }
+
+    pub fn open(
+        self,
+        sender_data_secret: &SenderDataSecret<C>,
+        sender_key_source: &impl SenderKeySource<C>,
+        group_context: &GroupContext<C>,
+    ) -> Result<(SignedFramedContent<C>, ConfirmationTag<C>)> {
+        // Check outer properties are correct
+        if self.group_id != group_context.group_id {
+            return Err(Error("Wrong group"));
+        }
+
+        if self.epoch != group_context.epoch {
+            return Err(Error("Wrong epoch"));
+        }
+
+        // Decrypt sender data
+        let (key, nonce) =
+            C::sender_data_key_nonce(&sender_data_secret.0, self.ciphertext.as_ref());
+        let aad = SenderDataAad {
+            group_id: &self.group_id,
+            epoch: self.epoch,
+            content_type: CONTENT_TYPE_COMMIT,
+        }
+        .materialize()?;
+
+        let sender_data =
+            AeadEncrypt::<C, _>::open(self.encrypted_sender_data, &key, &nonce, &aad)?;
+        let SenderData {
+            leaf_index,
+            generation,
+            reuse_guard, // TODO(RLB) Actually apply the reuse guard
+        } = sender_data;
+
+        // Look up keys for the sender and generation
+        let (key, nonce) = sender_key_source
+            .find_keys(leaf_index, generation)
+            .ok_or(Error("Unknown sender"))?;
+
+        // Decrypt content
+        let aad = PrivateMessageContentAad {
+            group_id: &self.group_id,
+            epoch: self.epoch,
+            content_type: CONTENT_TYPE_COMMIT,
+            authenticated_data: &self.authenticated_data,
+        }
+        .materialize()?;
+
+        let content = PrivateMessageContent::open(self.ciphertext, &key, &nonce, &aad)?;
+
+        // Construct objects to return
+        let tbs = FramedContentTbs {
+            version: consts::SUPPORTED_VERSION,
+            wire_format: consts::SUPPORTED_WIRE_FORMAT,
+            content: FramedContent {
+                group_id: self.group_id,
+                epoch: self.epoch,
+                sender: Sender::Member(leaf_index),
+                authenticated_data: self.authenticated_data,
+                content: MessageContent::Commit(content.commit),
+            },
+            binder: FramedContentBinder::<C>::Member(group_context.clone()),
+        };
+
+        let signed_framed_content = SignedFramedContent {
+            tbs,
+            signature: content.signature,
+        };
+        let confirmation_tag = content.confirmation_tag;
+
+        Ok((signed_framed_content, confirmation_tag))
+    }
+}
+
+pub trait SenderKeySource<C: Crypto> {
+    fn find_keys<'a>(
+        &self,
+        sender: LeafIndex,
+        generation: Generation,
+    ) -> Option<(AeadKey<C>, AeadNonce<C>)>;
 }
 
 #[cfg(test)]

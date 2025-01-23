@@ -5,10 +5,8 @@ use syn::*;
 
 #[proc_macro_derive(Serialize, attributes(discriminant))]
 pub fn derive_serialize(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    // Parse the input tokens into a syntax tree.
     let input = parse_macro_input!(input as DeriveInput);
 
-    // Used in the quasi-quotation below as `#name`.
     let name = input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -23,6 +21,22 @@ pub fn derive_serialize(input: proc_macro::TokenStream) -> proc_macro::TokenStre
                 #serialize_body
                 Ok(())
             }
+        }
+    };
+
+    proc_macro::TokenStream::from(expanded)
+}
+
+#[proc_macro_derive(Materialize)]
+pub fn derive_materialize(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+
+    let name = input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    let expanded = quote! {
+        impl #impl_generics Materialize for #name #ty_generics #where_clause {
+            type Storage = Vec<u8, { #name::MAX_SIZE }>;
         }
     };
 

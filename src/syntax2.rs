@@ -3,7 +3,7 @@ use crate::io::*;
 
 use heapless::Vec;
 
-pub use derive_serialize::{Deserialize, Serialize};
+pub use derive_serialize::{Deserialize, Materialize, Serialize};
 
 pub trait Serialize {
     /// The maximum size of a serialized value
@@ -11,6 +11,18 @@ pub trait Serialize {
 
     /// Serialize the provided object to the stream.
     fn serialize(&self, writer: &mut impl Write) -> Result<()>;
+}
+
+pub trait Materialize: Serialize {
+    /// A storage type that can hold a serialized object
+    type Storage: Default + Write + AsRef<[u8]>;
+
+    /// Create an owned object containing a serialized version of this object
+    fn materialize(&self) -> Result<Self::Storage> {
+        let mut storage = Self::Storage::default();
+        self.serialize(&mut storage)?;
+        Ok(storage)
+    }
 }
 
 pub trait Deserialize: Sized {
