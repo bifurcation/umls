@@ -1,4 +1,4 @@
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::*;
@@ -49,78 +49,6 @@ pub fn derive_deserialize(input: proc_macro::TokenStream) -> proc_macro::TokenSt
     proc_macro::TokenStream::from(expanded)
 }
 
-#[proc_macro_derive(Signed, attributes(label))]
-pub fn derive_signed(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-
-    let name = input.ident;
-    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
-
-    // The ToBeSigned type is the type of the "tbs" field
-    let Data::Struct(data) = &input.data else {
-        panic!("Signed structures must be structs");
-    };
-
-    let Fields::Named(fields) = &data.fields else {
-        panic!("Signed structures must have named fields");
-    };
-
-    let tbs_ident = Some(Ident::new("tbs", Span::call_site()));
-    let Some(tbs) = fields.named.iter().find(|f| f.ident == tbs_ident) else {
-        panic!("Signed structures must have a 'tbs' field");
-    };
-
-    let to_be_signed = &tbs.ty;
-
-    // The signature label is provided by an attribute
-    let mut attrs = input.attrs.iter().filter_map(|attr| match &attr.meta {
-        Meta::NameValue(MetaNameValue { path, value, .. }) => {
-            if !path.is_ident("label") {
-                return None;
-            }
-
-            let Expr::Lit(ExprLit {
-                lit: Lit::ByteStr(lit_str),
-                ..
-            }) = value
-            else {
-                return None;
-            };
-
-            Some(lit_str)
-        }
-        _ => None,
-    });
-
-    let Some(label) = attrs.next() else {
-        panic!("Signed structures must have a 'label' attribute");
-    };
-
-    // Produce the implementation
-    let expanded = quote! {
-        impl #impl_generics Signed #ty_generics for #name #ty_generics #where_clause {
-            type ToBeSigned = #to_be_signed;
-            const LABEL: &[u8] = #label;
-
-            fn new(tbs: Self::ToBeSigned, signature: C::Signature) -> Self {
-                Self { tbs, signature }
-            }
-
-            fn tbs(&self) -> &Self::ToBeSigned {
-                &self.tbs
-            }
-            fn signature(&self) -> &C::Signature {
-                &self.signature
-            }
-        }
-    };
-
-    proc_macro::TokenStream::from(expanded)
-}
-
-// For structs, expands to an expression like:
-//
-//     0 + A::MAX_SIZE + B::MAX_SIZE
 fn total_size(fields: &Fields) -> TokenStream {
     match fields {
         Fields::Named(ref fields) => {

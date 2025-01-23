@@ -165,7 +165,7 @@ impl<T: Deserialize, const N: usize> Deserialize for Vec<T, N> {
 
 // Opaque
 #[derive(Clone, PartialEq, Debug, Default)]
-pub struct Opaque<const N: usize>(Vec<u8, N>);
+pub struct Opaque<const N: usize>(pub Vec<u8, N>);
 
 impl<const N: usize> Serialize for Opaque<N> {
     const MAX_SIZE: usize = Varint::size(N) + N;
