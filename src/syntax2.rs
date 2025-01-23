@@ -18,6 +18,18 @@ pub trait Deserialize: Sized {
     fn deserialize(reader: &mut impl Read) -> Result<Self>;
 }
 
+// Serialization by reference
+impl<'a, T> Serialize for &T
+where
+    T: Serialize,
+{
+    const MAX_SIZE: usize = T::MAX_SIZE;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        Serialize::serialize(*self, writer)
+    }
+}
+
 // Primitives
 #[derive(Serialize, Deserialize)]
 pub struct Nil;
@@ -76,6 +88,23 @@ where
             1 => Ok(Some(T::deserialize(reader)?)),
             _ => Err(Error("Invalid encoding")),
         }
+    }
+}
+
+// Byte arrays
+impl<const N: usize> Serialize for [u8; N] {
+    const MAX_SIZE: usize = N;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        writer.write(self)
+    }
+}
+
+impl<const N: usize> Deserialize for [u8; N] {
+    fn deserialize(reader: &mut impl Read) -> Result<Self> {
+        let mut arr = [0; N];
+        arr.copy_from_slice(reader.read(N)?);
+        Ok(arr)
     }
 }
 
@@ -160,6 +189,25 @@ impl<T: Deserialize, const N: usize> Deserialize for Vec<T, N> {
         }
 
         Ok(vec)
+    }
+}
+
+// Raw
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Raw<const N: usize>(pub Vec<u8, N>);
+
+impl<const N: usize> Serialize for Raw<N> {
+    const MAX_SIZE: usize = N;
+
+    fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        writer.write(&self.0)
+    }
+}
+
+impl<const N: usize> Deserialize for Raw<N> {
+    fn deserialize(reader: &mut impl Read) -> Result<Self> {
+        let vec = Vec::from_slice(reader.read(N)?).map_err(|_| Error("Too many elements"))?;
+        Ok(Self(vec))
     }
 }
 

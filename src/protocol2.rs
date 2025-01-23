@@ -6,12 +6,8 @@ use aead::Buffer;
 use heapless::Vec;
 use rand_core::CryptoRngCore;
 
-// XXX(RLB): It would be good to make this an attribute of the cipher suite.  This causes problems
-// with sizing encrypted objects, because you can't invoke C::AEAD_OVERHEAD generically. ("cannot
-// perform const operation using `C`")  And this is the value for all known ciphersuites anyway.
-const AEAD_OVERHEAD: usize = 16;
-
 trait Crypto {
+    type RawHashOutput: Serialize + Deserialize;
     type HashOutput: Serialize + Deserialize;
 
     type HpkePrivateKey: Serialize + Deserialize;
@@ -67,8 +63,13 @@ trait Crypto {
     //
     //    EncryptedT = Opaque<{ T::MAX_SIZE + C::AEAD_OVERHEAD }>
     type EncryptedGroupSecrets: Default + Read + Write + Serialize + Deserialize + Buffer;
+    type EncryptedGroupInfo: Default + Read + Write + Serialize + Deserialize + Buffer;
+    type EncryptedPathSecret: Default + Read + Write + Serialize + Deserialize + Buffer;
+    type EncryptedSenderData: Default + Read + Write + Serialize + Deserialize + Buffer;
+    type EncryptedPrivateMessageContent: Default + Read + Write + Serialize + Deserialize + Buffer;
 }
 
+type RawHashOutput<C> = <C as Crypto>::RawHashOutput;
 type HashOutput<C> = <C as Crypto>::HashOutput;
 type HpkeKemOutput<C> = <C as Crypto>::HpkeKemOutput;
 type HpkePrivateKey<C> = <C as Crypto>::HpkePrivateKey;
@@ -78,6 +79,11 @@ type SignaturePublicKey<C> = <C as Crypto>::SignaturePublicKey;
 type Signature<C> = <C as Crypto>::Signature;
 type AeadKey<C> = <C as Crypto>::AeadKey;
 type AeadNonce<C> = <C as Crypto>::AeadNonce;
+type EncryptedGroupSecrets<C> = <C as Crypto>::EncryptedGroupSecrets;
+type EncryptedGroupInfo<C> = <C as Crypto>::EncryptedGroupInfo;
+type EncryptedPathSecret<C> = <C as Crypto>::EncryptedPathSecret;
+type EncryptedSenderData<C> = <C as Crypto>::EncryptedSenderData;
+type EncryptedPrivateMessageContent<C> = <C as Crypto>::EncryptedPrivateMessageContent;
 
 #[derive(Serialize, Deserialize)]
 struct Signed<T: Serialize + Deserialize, C: Crypto> {
@@ -191,6 +197,20 @@ mod consts {
     // GroupInfo
     pub const MAX_GROUP_INFO_EXTENSIONS: usize = 0;
     pub const MAX_GROUP_INFO_EXTENSION_LEN: usize = 0;
+
+    // Welcome
+    pub const MAX_JOINERS_PER_WELCOME: usize = 1;
+
+    // RatchetTree
+    pub const MAX_GROUP_SIZE: usize = 8;
+    pub const MAX_RESOLUTION_SIZE: usize = MAX_GROUP_SIZE / 2;
+    pub const MAX_TREE_DEPTH: usize = (MAX_GROUP_SIZE.ilog2() as usize) + 1;
+
+    // Commit
+    pub const MAX_PROPOSALS_PER_COMMIT: usize = 1;
+
+    // PrivateMessage
+    pub const MAX_PRIVATE_MESSAGE_AAD_LEN: usize = 0;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -366,7 +386,179 @@ struct GroupSecrets<C: Crypto> {
     psks: Vec<Nil, 0>,
 }
 
-impl<C: Crypto> AeadEncrypt<C, C::EncryptedGroupSecrets> for GroupSecrets<C> {}
+impl<C: Crypto> AeadEncrypt<C, EncryptedGroupSecrets<C>> for GroupSecrets<C> {}
+
+#[derive(Serialize, Deserialize)]
+struct HashRef<C: Crypto>(HashOutput<C>);
+
+#[derive(Serialize, Deserialize)]
+struct EncryptedGroupSecretsEntry<C: Crypto> {
+    new_member: HashRef<C>,
+    encrypted_group_secrets: HpkeCiphertext<C, EncryptedGroupSecrets<C>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Welcome<C: Crypto> {
+    cipher_suite: CipherSuite,
+    secrets: Vec<EncryptedGroupSecretsEntry<C>, { consts::MAX_JOINERS_PER_WELCOME }>,
+    encrypted_group_info: EncryptedGroupInfo<C>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RawPathSecret<C: Crypto>(RawHashOutput<C>);
+
+impl<C: Crypto> AeadEncrypt<C, EncryptedPathSecret<C>> for RawPathSecret<C> {}
+
+type HpkeEncryptedPathSecret<C> = HpkeCiphertext<C, EncryptedPathSecret<C>>;
+
+#[derive(Serialize, Deserialize)]
+struct UpdatePathNode<C: Crypto> {
+    encryption_key: HpkePublicKey<C>,
+    encrypted_path_secret: Vec<HpkeEncryptedPathSecret<C>, { consts::MAX_RESOLUTION_SIZE }>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct UpdatePath<C: Crypto> {
+    leaf_node: LeafNode<C>,
+    nodes: Vec<UpdatePathNode<C>, { consts::MAX_TREE_DEPTH }>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Add<C: Crypto> {
+    key_package: KeyPackage<C>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Remove {
+    remoed: LeafIndex,
+}
+
+#[derive(Serialize, Deserialize)]
+#[discriminant = "u16"]
+enum Proposal<C: Crypto> {
+    #[discriminant = "1"]
+    Add(Add<C>),
+
+    #[discriminant = "3"]
+    Remove(Remove),
+}
+
+#[derive(Serialize, Deserialize)]
+#[discriminant = "u8"]
+enum ProposalOrRef<C: Crypto> {
+    #[discriminant = "1"]
+    Proposal(Proposal<C>),
+}
+
+#[derive(Serialize, Deserialize)]
+struct Commit<C: Crypto> {
+    proposals: Vec<ProposalOrRef<C>, { consts::MAX_PROPOSALS_PER_COMMIT }>,
+    path: Option<UpdatePath<C>>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[discriminant = "u8"]
+enum Sender {
+    #[discriminant = "1"]
+    Member(LeafIndex),
+}
+
+#[derive(Serialize, Deserialize)]
+#[discriminant = "u8"]
+enum MessageContent<C: Crypto> {
+    #[discriminant = "3"]
+    Commit(Commit<C>),
+}
+
+#[derive(Serialize, Deserialize)]
+struct PrivateMessageAad(Opaque<{ consts::MAX_PRIVATE_MESSAGE_AAD_LEN }>);
+
+#[derive(Serialize, Deserialize)]
+struct FramedContent<C: Crypto> {
+    group_id: GroupId,
+    epoch: Epoch,
+    sender: Sender,
+    authenticated_data: PrivateMessageAad,
+    content: MessageContent<C>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct WireFormat(u16);
+
+#[derive(Serialize, Deserialize)]
+#[discriminant = "u8"]
+enum FramedContentBinder<C: Crypto> {
+    #[discriminant = "1"]
+    Member(GroupContext<C>),
+}
+
+#[derive(Serialize, Deserialize)]
+struct FramedContentTbs<C: Crypto> {
+    version: ProtocolVersion,
+    wire_format: WireFormat,
+    content: FramedContent<C>,
+    binder: FramedContentBinder<C>,
+}
+
+type SignedFramedContent<C> = Signed<FramedContentTbs<C>, C>;
+
+impl<C: Crypto> SignatureLabel for SignedFramedContent<C> {
+    const SIGNATURE_LABEL: &[u8] = b"FramedContentTBS";
+}
+
+#[derive(Serialize, Deserialize)]
+struct Generation(u32);
+
+#[derive(Serialize, Deserialize)]
+struct ReuseGuard([u8; 4]);
+
+#[derive(Serialize, Deserialize)]
+struct ContentType(u8);
+
+const CONTENT_TYPE_COMMIT: ContentType = ContentType(3);
+
+#[derive(Serialize)]
+struct SenderDataAad<'a> {
+    group_id: &'a GroupId,
+    epoch: Epoch,
+    content_type: ContentType,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SenderData {
+    leaf_index: LeafIndex,
+    generation: Generation,
+    reuse_guard: ReuseGuard,
+}
+
+impl<C: Crypto> AeadEncrypt<C, EncryptedSenderData<C>> for SenderData {}
+
+#[derive(Serialize)]
+struct PrivateMessageContentAad<'a> {
+    group_id: &'a GroupId,
+    epoch: Epoch,
+    content_type: ContentType,
+    authenticated_data: &'a PrivateMessageAad,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PrivateMessageContent<C: Crypto> {
+    commit: Commit<C>,
+    signature: Signature<C>,
+    confirmation_tag: ConfirmationTag<C>,
+}
+
+impl<C: Crypto> AeadEncrypt<C, EncryptedPrivateMessageContent<C>> for PrivateMessageContent<C> {}
+
+#[derive(Serialize, Deserialize)]
+struct PrivateMessage<C: Crypto> {
+    group_id: GroupId,
+    epoch: Epoch,
+    content_type: ContentType,
+    authenticated_data: PrivateMessageAad,
+    encrypted_sender_data: EncryptedSenderData<C>,
+    ciphertext: EncryptedPrivateMessageContent<C>,
+}
 
 #[cfg(test)]
 mod test {
