@@ -33,7 +33,6 @@ pub mod consts {
 
     // GroupInfo
     pub const MAX_GROUP_INFO_EXTENSIONS: usize = 1;
-    pub const MAX_GROUP_INFO_EXTENSION_LEN: usize = 10000;
 
     // Welcome
     pub const MAX_JOINERS_PER_WELCOME: usize = 1;
@@ -240,26 +239,26 @@ pub struct LeafIndex(pub u32);
 pub struct ConfirmationTag<C: Crypto>(pub HashOutput<C>);
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GroupInfoExtension {
+pub struct GroupInfoExtension<C: CryptoSizes> {
     pub extension_type: ExtensionType,
-    pub extension_data: Opaque<{ consts::MAX_GROUP_INFO_EXTENSION_LEN }>,
+    pub extension_data: SerializedRatchetTree<C>,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct GroupInfoTbs<C: Crypto> {
+pub struct GroupInfoTbs<C: CryptoSizes> {
     pub group_context: GroupContext<C>,
-    pub extensions: Vec<GroupInfoExtension, { consts::MAX_GROUP_INFO_EXTENSIONS }>,
+    pub extensions: Vec<GroupInfoExtension<C>, { consts::MAX_GROUP_INFO_EXTENSIONS }>,
     pub confirmation_tag: ConfirmationTag<C>,
     pub signer: LeafIndex,
 }
 
 pub type GroupInfo<C> = Signed<GroupInfoTbs<C>, C>;
 
-impl<C: Crypto> SignatureLabel for GroupInfo<C> {
+impl<C: CryptoSizes> SignatureLabel for GroupInfo<C> {
     const SIGNATURE_LABEL: &[u8] = b"GroupInfoTBS";
 }
 
-impl<C: Crypto> AeadEncrypt<C, EncryptedGroupInfo<C>> for GroupInfo<C> {}
+impl<C: CryptoSizes> AeadEncrypt<C, EncryptedGroupInfo<C>> for GroupInfo<C> {}
 
 #[derive(Serialize, Deserialize)]
 pub struct JoinerSecret<C: Crypto>(pub HashOutput<C>);
@@ -276,7 +275,7 @@ pub struct GroupSecrets<C: Crypto> {
     pub psks: Vec<Nil, 0>,
 }
 
-impl<C: Crypto> AeadEncrypt<C, EncryptedGroupSecrets<C>> for GroupSecrets<C> {}
+impl<C: CryptoSizes> AeadEncrypt<C, EncryptedGroupSecrets<C>> for GroupSecrets<C> {}
 
 pub type HpkeEncryptedGroupSecrets<C> = HpkeCiphertext<C, EncryptedGroupSecrets<C>>;
 
@@ -284,13 +283,13 @@ pub type HpkeEncryptedGroupSecrets<C> = HpkeCiphertext<C, EncryptedGroupSecrets<
 pub struct HashRef<C: Crypto>(pub HashOutput<C>);
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EncryptedGroupSecretsEntry<C: Crypto> {
+pub struct EncryptedGroupSecretsEntry<C: CryptoSizes> {
     pub new_member: HashRef<C>,
     pub encrypted_group_secrets: HpkeCiphertext<C, EncryptedGroupSecrets<C>>,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct Welcome<C: Crypto> {
+pub struct Welcome<C: CryptoSizes> {
     pub cipher_suite: CipherSuite,
     pub secrets: Vec<EncryptedGroupSecretsEntry<C>, { consts::MAX_JOINERS_PER_WELCOME }>,
     pub encrypted_group_info: EncryptedGroupInfo<C>,
@@ -299,18 +298,18 @@ pub struct Welcome<C: Crypto> {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RawPathSecret<C: Crypto>(pub RawHashOutput<C>);
 
-impl<C: Crypto> AeadEncrypt<C, EncryptedPathSecret<C>> for RawPathSecret<C> {}
+impl<C: CryptoSizes> AeadEncrypt<C, EncryptedPathSecret<C>> for RawPathSecret<C> {}
 
 pub type HpkeEncryptedPathSecret<C> = HpkeCiphertext<C, EncryptedPathSecret<C>>;
 
 #[derive(Serialize, Deserialize)]
-pub struct UpdatePathNode<C: Crypto> {
+pub struct UpdatePathNode<C: CryptoSizes> {
     pub encryption_key: HpkePublicKey<C>,
     pub encrypted_path_secret: Vec<HpkeEncryptedPathSecret<C>, { consts::MAX_RESOLUTION_SIZE }>,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct UpdatePath<C: Crypto> {
+pub struct UpdatePath<C: CryptoSizes> {
     pub leaf_node: LeafNode<C>,
     pub nodes: Vec<UpdatePathNode<C>, { consts::MAX_TREE_DEPTH }>,
 }
@@ -343,7 +342,7 @@ pub enum ProposalOrRef<C: Crypto> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct Commit<C: Crypto> {
+pub struct Commit<C: CryptoSizes> {
     pub proposals: Vec<ProposalOrRef<C>, { consts::MAX_PROPOSALS_PER_COMMIT }>,
     pub path: Option<UpdatePath<C>>,
 }
@@ -357,7 +356,7 @@ pub enum Sender {
 
 #[derive(Serialize, Deserialize)]
 #[discriminant = "u8"]
-pub enum MessageContent<C: Crypto> {
+pub enum MessageContent<C: CryptoSizes> {
     #[discriminant = "3"]
     Commit(Commit<C>),
 }
@@ -366,7 +365,7 @@ pub enum MessageContent<C: Crypto> {
 pub struct PrivateMessageAad(Opaque<{ consts::MAX_PRIVATE_MESSAGE_AAD_LEN }>);
 
 #[derive(Serialize, Deserialize)]
-pub struct FramedContent<C: Crypto> {
+pub struct FramedContent<C: CryptoSizes> {
     pub group_id: GroupId,
     pub epoch: Epoch,
     pub sender: Sender,
@@ -385,7 +384,7 @@ pub enum FramedContentBinder<C: Crypto> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct FramedContentTbs<C: Crypto> {
+pub struct FramedContentTbs<C: CryptoSizes> {
     pub version: ProtocolVersion,
     pub wire_format: WireFormat,
     pub content: FramedContent<C>,
@@ -394,7 +393,7 @@ pub struct FramedContentTbs<C: Crypto> {
 
 pub type SignedFramedContent<C> = Signed<FramedContentTbs<C>, C>;
 
-impl<C: Crypto> SignatureLabel for SignedFramedContent<C> {
+impl<C: CryptoSizes> SignatureLabel for SignedFramedContent<C> {
     const SIGNATURE_LABEL: &[u8] = b"FramedContentTBS";
 }
 
@@ -425,7 +424,7 @@ pub struct SenderData {
     pub reuse_guard: ReuseGuard,
 }
 
-impl<C: Crypto> AeadEncrypt<C, EncryptedSenderData<C>> for SenderData {}
+impl<C: CryptoSizes> AeadEncrypt<C, EncryptedSenderData<C>> for SenderData {}
 
 #[derive(Serialize, Materialize)]
 struct PrivateMessageContentAad<'a> {
@@ -436,16 +435,19 @@ struct PrivateMessageContentAad<'a> {
 }
 
 #[derive(Serialize, Deserialize)]
-struct PrivateMessageContent<C: Crypto> {
+pub struct PrivateMessageContent<C: CryptoSizes> {
     commit: Commit<C>,
     signature: Signature<C>,
     confirmation_tag: ConfirmationTag<C>,
 }
 
-impl<C: Crypto> AeadEncrypt<C, EncryptedPrivateMessageContent<C>> for PrivateMessageContent<C> {}
+impl<C: CryptoSizes> AeadEncrypt<C, EncryptedPrivateMessageContent<C>>
+    for PrivateMessageContent<C>
+{
+}
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct PrivateMessage<C: Crypto> {
+pub struct PrivateMessage<C: CryptoSizes> {
     group_id: GroupId,
     epoch: Epoch,
     content_type: ContentType,
@@ -454,7 +456,7 @@ pub struct PrivateMessage<C: Crypto> {
     ciphertext: EncryptedPrivateMessageContent<C>,
 }
 
-impl<C: Crypto> PrivateMessage<C> {
+impl<C: CryptoSizes> PrivateMessage<C> {
     pub fn new(
         signed_framed_content: SignedFramedContent<C>,
         confirmation_tag: ConfirmationTag<C>,
@@ -594,26 +596,4 @@ pub trait SenderKeySource<C: Crypto> {
         sender: LeafIndex,
         generation: Generation,
     ) -> Option<(AeadKey<C>, AeadNonce<C>)>;
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    use crate::crypto::test::RustCryptoX25519;
-
-    /*
-    fn print_size<T: Serialize>() {
-        println!("{} => {}", core::any::type_name::<T>(), T::MAX_SIZE);
-    }
-
-    #[test]
-    fn object_sizes() {
-        print_size::<GroupSecrets<RustCryptoX25519>>();
-        print_size::<GroupInfo<RustCryptoX25519>>();
-        print_size::<RawPathSecret<RustCryptoX25519>>();
-        print_size::<SenderData>();
-        print_size::<PrivateMessageContent<RustCryptoX25519>>();
-    }
-    */
 }

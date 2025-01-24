@@ -119,52 +119,6 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         aad: &[u8],
     ) -> Result<()>;
 
-    // XXX(RLB): These constants are unfortunately needed due to the limitations on const generics.
-    // We might need to arrange them separately (e.g., in a separate trait) to make it easier to
-    // manage them.  They should basically be:
-    //
-    //    EncryptedT = Opaque<{ T::MAX_SIZE + C::AEAD_OVERHEAD }>
-    type EncryptedGroupSecrets: Clone
-        + Default
-        + Debug
-        + AsRef<[u8]>
-        + Write
-        + Serialize
-        + Deserialize
-        + Buffer;
-    type EncryptedGroupInfo: Clone
-        + Default
-        + Debug
-        + AsRef<[u8]>
-        + Write
-        + Serialize
-        + Deserialize
-        + Buffer;
-    type EncryptedPathSecret: Clone
-        + Default
-        + Debug
-        + AsRef<[u8]>
-        + Write
-        + Serialize
-        + Deserialize
-        + Buffer;
-    type EncryptedSenderData: Clone
-        + Default
-        + Debug
-        + AsRef<[u8]>
-        + Write
-        + Serialize
-        + Deserialize
-        + Buffer;
-    type EncryptedPrivateMessageContent: Clone
-        + Default
-        + Debug
-        + AsRef<[u8]>
-        + Write
-        + Serialize
-        + Deserialize
-        + Buffer;
-
     fn hmac(key: &[u8], data: &[u8]) -> Self::HashOutput {
         let mut hmac = Self::Hmac::new(key);
         hmac.write(data).unwrap();
@@ -336,7 +290,64 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
     }
 }
 
-trait EncryptedObjects: Crypto {}
+pub trait DependentSizes {
+    // XXX(RLB): These constants are unfortunately needed due to the limitations on const generics.
+    // We might need to arrange them separately (e.g., in a separate trait) to make it easier to
+    // manage them.  They should basically be:
+    //
+    //    EncryptedT = Opaque<{ T::MAX_SIZE + C::AEAD_OVERHEAD }>
+    type SerializedRatchetTree: Clone
+        + Default
+        + Debug
+        + AsRef<[u8]>
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+    type EncryptedGroupSecrets: Clone
+        + Default
+        + Debug
+        + AsRef<[u8]>
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+    type EncryptedGroupInfo: Clone
+        + Default
+        + Debug
+        + AsRef<[u8]>
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+    type EncryptedPathSecret: Clone
+        + Default
+        + Debug
+        + AsRef<[u8]>
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+    type EncryptedSenderData: Clone
+        + Default
+        + Debug
+        + AsRef<[u8]>
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+    type EncryptedPrivateMessageContent: Clone
+        + Default
+        + Debug
+        + AsRef<[u8]>
+        + Write
+        + Serialize
+        + Deserialize
+        + Buffer;
+}
+
+pub trait CryptoSizes: Crypto + DependentSizes {}
+impl<T> CryptoSizes for T where T: Crypto + DependentSizes {}
 
 pub type RawHashOutput<C> = <C as Crypto>::RawHashOutput;
 pub type HashOutput<C> = <C as Crypto>::HashOutput;
@@ -348,11 +359,12 @@ pub type SignaturePublicKey<C> = <C as Crypto>::SignaturePublicKey;
 pub type Signature<C> = <C as Crypto>::Signature;
 pub type AeadKey<C> = <C as Crypto>::AeadKey;
 pub type AeadNonce<C> = <C as Crypto>::AeadNonce;
-pub type EncryptedGroupSecrets<C> = <C as Crypto>::EncryptedGroupSecrets;
-pub type EncryptedGroupInfo<C> = <C as Crypto>::EncryptedGroupInfo;
-pub type EncryptedPathSecret<C> = <C as Crypto>::EncryptedPathSecret;
-pub type EncryptedSenderData<C> = <C as Crypto>::EncryptedSenderData;
-pub type EncryptedPrivateMessageContent<C> = <C as Crypto>::EncryptedPrivateMessageContent;
+pub type SerializedRatchetTree<C> = <C as DependentSizes>::SerializedRatchetTree;
+pub type EncryptedGroupSecrets<C> = <C as DependentSizes>::EncryptedGroupSecrets;
+pub type EncryptedGroupInfo<C> = <C as DependentSizes>::EncryptedGroupInfo;
+pub type EncryptedPathSecret<C> = <C as DependentSizes>::EncryptedPathSecret;
+pub type EncryptedSenderData<C> = <C as DependentSizes>::EncryptedSenderData;
+pub type EncryptedPrivateMessageContent<C> = <C as DependentSizes>::EncryptedPrivateMessageContent;
 
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct Signed<T: Serialize + Deserialize, C: Crypto> {
@@ -867,13 +879,23 @@ pub mod test {
 
             Ok(())
         }
+    }
 
+    use crate::protocol::{GroupInfo, GroupSecrets, PathSecret, PrivateMessageContent, SenderData};
+    use crate::treekem::RatchetTree;
+
+    impl DependentSizes for RustCryptoX25519 {
         // XXX(RLB) These numbers are wildly over-sized.  But it saves us having to actually
         // compute them.
-        type EncryptedGroupSecrets = BufferVec<1000>;
-        type EncryptedGroupInfo = BufferVec<10000>;
-        type EncryptedPathSecret = BufferVec<100>;
-        type EncryptedSenderData = BufferVec<100>;
-        type EncryptedPrivateMessageContent = BufferVec<10000>;
+        type SerializedRatchetTree = BufferVec<{ RatchetTree::<RustCryptoX25519>::MAX_SIZE }>;
+        type EncryptedGroupSecrets =
+            BufferVec<{ GroupSecrets::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedGroupInfo =
+            BufferVec<{ GroupInfo::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedPathSecret =
+            BufferVec<{ PathSecret::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedSenderData = BufferVec<{ SenderData::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedPrivateMessageContent =
+            BufferVec<{ PrivateMessageContent::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
     }
 }

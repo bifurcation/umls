@@ -7,7 +7,7 @@ use crate::syntax::*;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InterimTranscriptHash<C: Crypto>(HashOutput<C>);
 
-pub fn confirmed<C: Crypto>(
+pub fn confirmed<C: CryptoSizes>(
     interim_transcript_hash: &InterimTranscriptHash<C>,
     content: &FramedContent<C>,
     signature: &Signature<C>,

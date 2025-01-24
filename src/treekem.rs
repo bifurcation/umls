@@ -468,7 +468,10 @@ impl<C: Crypto> RatchetTree<C> {
         rng: &mut (impl CryptoRngCore + Rng),
         from: LeafIndex,
         signature_priv: &SignaturePrivateKey<C>,
-    ) -> Result<(RatchetTreePriv<C>, UpdatePath<C>)> {
+    ) -> Result<(RatchetTreePriv<C>, UpdatePath<C>)>
+    where
+        C: DependentSizes,
+    {
         let path = self.resolve_path(from);
 
         // Generate path secrets
@@ -541,7 +544,10 @@ impl<C: Crypto> RatchetTree<C> {
         group_context: &GroupContext<C>,
         ratchet_tree_priv: &RatchetTreePriv<C>,
         mut update_path: UpdatePath<C>,
-    ) -> Result<UpdatePath<C>> {
+    ) -> Result<UpdatePath<C>>
+    where
+        C: DependentSizes,
+    {
         let path = self.resolve_path(from);
         let group_context = group_context.materialize()?;
 
@@ -593,7 +599,10 @@ impl<C: Crypto> RatchetTree<C> {
         from: LeafIndex,
         to: LeafIndex,
         group_context: &GroupContext<C>,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        C: DependentSizes,
+    {
         let path = self.resolve_path(from);
         let group_context = group_context.materialize()?;
 
@@ -709,7 +718,10 @@ impl<C: Crypto> RatchetTree<C> {
         Ok(h.finalize())
     }
 
-    pub fn merge(&mut self, nodes: &[UpdatePathNode<C>], from: LeafIndex) -> Result<HashOutput<C>> {
+    pub fn merge(&mut self, nodes: &[UpdatePathNode<C>], from: LeafIndex) -> Result<HashOutput<C>>
+    where
+        C: DependentSizes,
+    {
         let path = self.resolve_path(from);
         let curr = NodeIndex::from(from);
         let width = NodeCount::from(self.size());

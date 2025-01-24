@@ -11,7 +11,7 @@ use heapless::Vec;
 use rand::Rng;
 use rand_core::CryptoRngCore;
 
-pub fn make_key_package<C: Crypto>(
+pub fn make_key_package<C: CryptoSizes>(
     rng: &mut (impl Rng + CryptoRngCore),
     signature_priv: SignaturePrivateKey<C>,
     signature_key: SignaturePublicKey<C>,
@@ -53,14 +53,14 @@ pub fn make_key_package<C: Crypto>(
     Ok((key_package_priv, key_package))
 }
 
-pub enum Operation<C: Crypto> {
+pub enum Operation<C: CryptoSizes> {
     Add(KeyPackage<C>),
     Remove(LeafIndex),
 }
 
 // TODO(RLB) Just make this impl GroupState.  This will, for example, let us make GroupState fields
 // non-pub.
-pub trait MlsGroup<C: Crypto>: Sized {
+pub trait MlsGroup<C: CryptoSizes>: Sized {
     fn create(
         rng: &mut (impl Rng + CryptoRngCore),
         key_package_priv: KeyPackagePriv<C>,
@@ -83,7 +83,7 @@ pub trait MlsGroup<C: Crypto>: Sized {
     fn handle_commit(&mut self, commit: PrivateMessage<C>) -> Result<()>;
 }
 
-impl<C: Crypto> MlsGroup<C> for GroupState<C> {
+impl<C: CryptoSizes> MlsGroup<C> for GroupState<C> {
     fn create(
         rng: &mut (impl Rng + CryptoRngCore),
         key_package_priv: KeyPackagePriv<C>,
@@ -175,8 +175,8 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
         };
 
         let ratchet_tree = {
-            let ratchet_tree_data = &ratchet_tree_extension.extension_data;
-            RatchetTree::deserialize(&mut ratchet_tree_data.0.as_slice())?
+            let extension_data: &SerializedRatchetTree<C> = &ratchet_tree_extension.extension_data;
+            RatchetTree::deserialize(&mut extension_data.as_ref())?
         };
 
         let tree_hash = ratchet_tree.root_hash()?;
@@ -393,8 +393,9 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
                 extension_type: protocol::consts::EXTENSION_TYPE_RATCHET_TREE,
                 extension_data: Default::default(),
             };
+
             self.ratchet_tree
-                .serialize(&mut ratchet_tree_extension.extension_data.0)?;
+                .serialize(&mut ratchet_tree_extension.extension_data)?;
 
             let mut extensions = Vec::new();
             extensions.push(ratchet_tree_extension).unwrap();
