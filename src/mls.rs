@@ -1,11 +1,11 @@
 use crate::common::*;
-use crate::crypto2::*;
-use crate::group_state2::*;
-use crate::key_schedule2::*;
-use crate::protocol2::{self, *};
-use crate::syntax2::*;
-use crate::transcript_hash2;
-use crate::treekem2::*;
+use crate::crypto::*;
+use crate::group_state::*;
+use crate::key_schedule::*;
+use crate::protocol::{self, *};
+use crate::syntax::*;
+use crate::transcript_hash;
+use crate::treekem::*;
 
 use heapless::Vec;
 use rand::Rng;
@@ -112,7 +112,7 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
         let confirmation_tag =
             epoch_secret.confirmation_tag(&group_context.confirmed_transcript_hash);
         let interim_transcript_hash =
-            transcript_hash2::interim(&group_context.confirmed_transcript_hash, &confirmation_tag)?;
+            transcript_hash::interim(&group_context.confirmed_transcript_hash, &confirmation_tag)?;
 
         let my_ratchet_tree_priv = RatchetTreePriv {
             encryption_priv: key_package_priv.encryption_priv,
@@ -168,7 +168,7 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
             .tbs
             .extensions
             .iter()
-            .find(|ext| ext.extension_type == protocol2::consts::EXTENSION_TYPE_RATCHET_TREE);
+            .find(|ext| ext.extension_type == protocol::consts::EXTENSION_TYPE_RATCHET_TREE);
 
         let Some(ratchet_tree_extension) = ratchet_tree_extension else {
             return Err(Error("Not implemented"));
@@ -209,7 +209,7 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
         let confirmation_tag =
             epoch_secret.confirmation_tag(&group_context.confirmed_transcript_hash);
         let interim_transcript_hash =
-            transcript_hash2::interim(&group_context.confirmed_transcript_hash, &confirmation_tag)?;
+            transcript_hash::interim(&group_context.confirmed_transcript_hash, &confirmation_tag)?;
 
         // Construct the ratchet tree private state
         let my_ratchet_tree_priv = RatchetTreePriv::new(
@@ -315,7 +315,7 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
 
         let framed_content_tbs = FramedContentTbs {
             version: ProtocolVersion::default(),
-            wire_format: protocol2::consts::SUPPORTED_WIRE_FORMAT,
+            wire_format: protocol::consts::SUPPORTED_WIRE_FORMAT,
             content: framed_content,
             binder: FramedContentBinder::Member(group_context_prev),
         };
@@ -324,7 +324,7 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
             SignedFramedContent::sign(framed_content_tbs, &self.my_signature_priv)?;
 
         // Update the confirmed transcript hash
-        self.group_context.confirmed_transcript_hash = transcript_hash2::confirmed(
+        self.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
             &self.interim_transcript_hash,
             &signed_framed_content.tbs.content,
             &signed_framed_content.signature,
@@ -340,7 +340,7 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
         let confirmation_tag = self
             .epoch_secret
             .confirmation_tag(&self.group_context.confirmed_transcript_hash);
-        self.interim_transcript_hash = transcript_hash2::interim(
+        self.interim_transcript_hash = transcript_hash::interim(
             &self.group_context.confirmed_transcript_hash,
             &confirmation_tag,
         )?;
@@ -390,7 +390,7 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
             secrets.push(encrypted_group_secrets).unwrap();
 
             let mut ratchet_tree_extension = GroupInfoExtension {
-                extension_type: protocol2::consts::EXTENSION_TYPE_RATCHET_TREE,
+                extension_type: protocol::consts::EXTENSION_TYPE_RATCHET_TREE,
                 extension_data: Default::default(),
             };
             self.ratchet_tree
@@ -490,7 +490,7 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
             .consistent(&self.ratchet_tree, self.my_index));
 
         // Update the confirmed transcript hash
-        self.group_context.confirmed_transcript_hash = transcript_hash2::confirmed(
+        self.group_context.confirmed_transcript_hash = transcript_hash::confirmed(
             &self.interim_transcript_hash,
             &signed_framed_content.tbs.content,
             &signed_framed_content.signature,
@@ -511,7 +511,7 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
             return Err(Error("Invalid confirmation tag"));
         }
 
-        self.interim_transcript_hash = transcript_hash2::interim(
+        self.interim_transcript_hash = transcript_hash::interim(
             &self.group_context.confirmed_transcript_hash,
             &confirmation_tag_computed,
         )?;
@@ -524,7 +524,7 @@ impl<C: Crypto> MlsGroup<C> for GroupState<C> {
 mod test {
     use super::*;
 
-    use crate::crypto2::test::RustCryptoX25519;
+    use crate::crypto::test::RustCryptoX25519;
     use rand::{seq::SliceRandom, SeedableRng};
 
     fn make_user(
@@ -619,9 +619,9 @@ mod test {
             self.op_count += 1;
             let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(self.op_count);
 
-            let roll: usize = rng.gen_range(0..protocol2::consts::MAX_GROUP_SIZE);
+            let roll: usize = rng.gen_range(0..protocol::consts::MAX_GROUP_SIZE);
 
-            let members: Vec<usize, { protocol2::consts::MAX_GROUP_SIZE }> = self
+            let members: Vec<usize, { protocol::consts::MAX_GROUP_SIZE }> = self
                 .states
                 .iter()
                 .enumerate()
@@ -697,7 +697,7 @@ mod test {
     fn test_large_group() {
         let mut group = TestGroup::new(b"big group", b"alice");
 
-        for i in 1..protocol2::consts::MAX_GROUP_SIZE {
+        for i in 1..protocol::consts::MAX_GROUP_SIZE {
             group.add(i - 1, b"bob");
             group.check();
         }

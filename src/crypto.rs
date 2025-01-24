@@ -1,7 +1,7 @@
 use crate::common::*;
 use crate::io::*;
-use crate::protocol2::CipherSuite;
-use crate::syntax2::*;
+use crate::protocol::CipherSuite;
+use crate::syntax::*;
 
 use aead::Buffer;
 use core::fmt::Debug;
@@ -458,7 +458,7 @@ where
 pub mod test {
     use super::*;
 
-    use crate::protocol2::X25519_AES128GCM_SHA256_ED25519;
+    use crate::protocol::X25519_AES128GCM_SHA256_ED25519;
 
     use aes_gcm::{aead::Buffer, AeadCore, AeadInPlace, Aes128Gcm, KeyInit};
     use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
@@ -574,7 +574,7 @@ pub mod test {
             AeadKey, AeadNonce, HashOutput, Hmac, Opaque, Vec, AEAD_KEY_SIZE, AEAD_NONCE_SIZE,
             HASH_OUTPUT_SIZE,
         };
-        use crate::crypto2::Hmac as _;
+        use crate::crypto::Hmac as _;
         use crate::io::Write as _;
 
         // 0x0020 = DHKEM(X25519, HKDF-SHA256)

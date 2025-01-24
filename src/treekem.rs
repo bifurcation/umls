@@ -1,9 +1,9 @@
 use crate::common::*;
-use crate::crypto2::*;
+use crate::crypto::*;
 use crate::io::*;
-use crate::protocol2::*;
-use crate::syntax2::*;
-use crate::tree_math2::*;
+use crate::protocol::*;
+use crate::syntax::*;
+use crate::tree_math::*;
 
 use heapless::{FnvIndexMap, Vec};
 use itertools::Itertools;
@@ -11,9 +11,9 @@ use rand::Rng;
 use rand_core::CryptoRngCore;
 
 mod consts {
-    pub use crate::protocol2::consts::MAX_GROUP_SIZE;
-    pub use crate::protocol2::consts::MAX_RESOLUTION_SIZE;
-    pub use crate::protocol2::consts::MAX_TREE_DEPTH;
+    pub use crate::protocol::consts::MAX_GROUP_SIZE;
+    pub use crate::protocol::consts::MAX_RESOLUTION_SIZE;
+    pub use crate::protocol::consts::MAX_TREE_DEPTH;
 
     pub const MAX_NODE_WIDTH: usize = 2 * MAX_GROUP_SIZE - 1;
     pub const ROOT_NODE_INDEX: usize = MAX_GROUP_SIZE - 1;

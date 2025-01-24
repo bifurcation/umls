@@ -1,7 +1,7 @@
 use crate::common::*;
-use crate::crypto2::*;
+use crate::crypto::*;
 use crate::io::*;
-use crate::syntax2::*;
+use crate::syntax::*;
 
 use heapless::Vec;
 
@@ -600,7 +600,7 @@ pub trait SenderKeySource<C: Crypto> {
 mod test {
     use super::*;
 
-    use crate::crypto2::test::RustCryptoX25519;
+    use crate::crypto::test::RustCryptoX25519;
 
     /*
     fn print_size<T: Serialize>() {

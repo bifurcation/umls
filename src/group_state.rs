@@ -1,11 +1,11 @@
 use crate::common::*;
-use crate::crypto2::*;
+use crate::crypto::*;
 use crate::io::*;
-use crate::key_schedule2::*;
-use crate::protocol2::*;
-use crate::syntax2::*;
-use crate::transcript_hash2::InterimTranscriptHash;
-use crate::treekem2::*;
+use crate::key_schedule::*;
+use crate::protocol::*;
+use crate::syntax::*;
+use crate::transcript_hash::InterimTranscriptHash;
+use crate::treekem::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GroupState<C: Crypto> {

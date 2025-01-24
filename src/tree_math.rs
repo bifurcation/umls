@@ -1,5 +1,5 @@
 use crate::common::*;
-use crate::protocol2::LeafIndex;
+use crate::protocol::LeafIndex;
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Eq, Hash)]
 pub struct NodeIndex(pub usize);

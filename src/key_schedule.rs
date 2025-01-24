@@ -1,9 +1,9 @@
 use crate::common::*;
-use crate::crypto2::*;
+use crate::crypto::*;
 use crate::io::*;
-use crate::protocol2::*;
-use crate::syntax2::*;
-use crate::tree_math2::*;
+use crate::protocol::*;
+use crate::syntax::*;
+use crate::tree_math::*;
 
 use rand::Rng;
 

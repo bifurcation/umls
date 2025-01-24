@@ -1,8 +1,8 @@
 use crate::common::*;
-use crate::crypto2::*;
+use crate::crypto::*;
 use crate::io::*;
-use crate::protocol2::{self, *};
-use crate::syntax2::*;
+use crate::protocol::{self, *};
+use crate::syntax::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InterimTranscriptHash<C: Crypto>(HashOutput<C>);
@@ -15,7 +15,7 @@ pub fn confirmed<C: Crypto>(
     let mut h = C::Hash::default();
 
     h.write(interim_transcript_hash.0.as_ref())?;
-    protocol2::consts::SUPPORTED_WIRE_FORMAT.serialize(&mut h)?;
+    protocol::consts::SUPPORTED_WIRE_FORMAT.serialize(&mut h)?;
     content.serialize(&mut h)?;
     signature.serialize(&mut h)?;
 
