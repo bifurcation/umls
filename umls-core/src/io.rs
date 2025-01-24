@@ -48,7 +48,7 @@ impl<const N: usize> Write for Vec<u8, N> {
     }
 }
 
-impl<'a> Read for &'a [u8] {
+impl Read for &[u8] {
     fn read(&mut self, n: usize) -> Result<&[u8]> {
         stack::update();
         stack::update();

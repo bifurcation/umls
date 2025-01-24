@@ -84,12 +84,12 @@ impl<C: Crypto> EpochSecret<C> {
         stack::update();
         let group_context = group_context.materialize()?;
 
-        let joiner_secret = JoinerSecret::new(&self, commit_secret, &group_context);
+        let joiner_secret = JoinerSecret::new(self, commit_secret, &group_context);
         let member_secret = joiner_secret.advance();
         let (welcome_key, welcome_nonce) = member_secret.welcome_key_nonce();
         *self = member_secret.advance(&group_context);
 
-        Ok((joiner_secret.into(), welcome_key, welcome_nonce))
+        Ok((joiner_secret, welcome_key, welcome_nonce))
     }
 
     pub fn confirmation_tag(
@@ -161,11 +161,11 @@ impl<C: Crypto> KeyScheduleJoinerSecret<C> for JoinerSecret<C> {
     ) -> Self {
         stack::update();
         let init_secret = C::derive_secret(&epoch_secret.0, b"init");
-        let pre_joiner_secret = C::extract(&init_secret, &commit_secret);
+        let pre_joiner_secret = C::extract(&init_secret, commit_secret);
         Self(C::expand_with_label(
             &pre_joiner_secret,
             b"joiner",
-            &group_context,
+            group_context,
         ))
     }
 
@@ -185,6 +185,6 @@ impl<C: Crypto> MemberSecret<C> {
 
     pub fn advance(&self, group_context: &[u8]) -> EpochSecret<C> {
         stack::update();
-        EpochSecret(C::expand_with_label(&self.0, b"epoch", &group_context))
+        EpochSecret(C::expand_with_label(&self.0, b"epoch", group_context))
     }
 }

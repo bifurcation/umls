@@ -314,7 +314,7 @@ impl Crypto for RustCryptoX25519 {
 
         let mut kem_context: Vec<u8, 64> = Vec::new();
         kem_context.extend_from_slice(kem_output.as_ref()).unwrap();
-        kem_context.extend_from_slice(&pk_r_m).unwrap();
+        kem_context.extend_from_slice(pk_r_m).unwrap();
 
         let shared_secret = hpke::extract_and_expand(dh.as_bytes(), kem_context.as_ref());
         Self::HpkeKemSecret::try_from(shared_secret.as_ref()).unwrap()

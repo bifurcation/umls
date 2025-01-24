@@ -51,7 +51,7 @@ impl<C: Crypto> RatchetTreePriv<C> {
         }
 
         Ok(Self {
-            encryption_priv: encryption_priv,
+            encryption_priv,
             path_secrets,
             commit_secret: Default::default(),
         })
@@ -126,7 +126,7 @@ impl<C: Crypto> RatchetTreePriv<C> {
             i += 1;
         }
 
-        return true;
+        true
     }
 }
 
@@ -285,7 +285,7 @@ impl<C: Crypto> RatchetTree<C> {
         &mut self.parent_nodes[i.0]
     }
 
-    fn encryption_key_at<'a>(&'a self, n: NodeIndex) -> Option<&'a HpkePublicKey<C>> {
+    fn encryption_key_at(&self, n: NodeIndex) -> Option<&HpkePublicKey<C>> {
         stack::update();
         // TODO(RLB) Find a way to do this with match, maybe by making NodeIndex an enum?
         if let Ok(n) = LeafIndex::try_from(n) {
@@ -374,7 +374,7 @@ impl<C: Crypto> RatchetTree<C> {
 
     pub fn remove_leaf(&mut self, removed: LeafIndex) -> Result<()> {
         stack::update();
-        if self.leaf_node_at(removed.into()).is_none() {
+        if self.leaf_node_at(removed).is_none() {
             return Err(Error("Member not in group"));
         }
 
@@ -749,7 +749,7 @@ impl<C: Crypto> RatchetTree<C> {
 
             *self.parent_node_at_mut(ParentIndex::try_from(*n).unwrap()) = Some(ParentNode {
                 public_key: public_key.clone(),
-                parent_hash: parent_hash,
+                parent_hash,
                 unmerged_leaves: Default::default(),
             });
         }
@@ -857,7 +857,7 @@ impl<C: Crypto> RatchetTree<C> {
         let width: NodeCount = self.size().into();
         let height = width.root().level();
         for level in 1..height {
-            let stride = 2 << (level as usize);
+            let stride = 2 << level;
             let start = (stride >> 1) - 1;
 
             for p in (start..width.0).step_by(stride) {

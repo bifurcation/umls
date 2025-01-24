@@ -290,7 +290,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
     ) -> Result<Self::Signature> {
         stack::update();
         let digest = Self::signature_digest(message, label)?;
-        Self::sign(digest.as_ref(), &sig_priv)
+        Self::sign(digest.as_ref(), sig_priv)
     }
 
     fn verify_with_label(
@@ -457,7 +457,7 @@ where
         aad: &[u8],
     ) -> Result<HpkeCiphertext<C, E>> {
         stack::update();
-        let (kem_output, kem_secret) = C::hpke_encap(rng, &encryption_key);
+        let (kem_output, kem_secret) = C::hpke_encap(rng, encryption_key);
         let (key, nonce) = C::hpke_key_nonce(kem_secret);
         let ciphertext = self.seal(&key, &nonce, aad)?;
         Ok(HpkeCiphertext {

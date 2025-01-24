@@ -597,7 +597,7 @@ impl<C: CryptoSizes> PrivateMessage<C> {
 }
 
 pub trait SenderKeySource<C: Crypto> {
-    fn find_keys<'a>(
+    fn find_keys(
         &self,
         sender: LeafIndex,
         generation: Generation,

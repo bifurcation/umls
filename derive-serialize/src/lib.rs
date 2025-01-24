@@ -239,7 +239,7 @@ fn deserialize(attrs: &[Attribute], data: &Data) -> TokenStream {
                 quote! { Ok(Self { #(#recurse)* }) }
             }
             Fields::Unnamed(ref fields) => {
-                let recurse = fields.unnamed.iter().enumerate().map(|(_i, f)| {
+                let recurse = fields.unnamed.iter().map(|f| {
                     let ty = &f.ty;
                     quote_spanned! {f.span()=>
                         <#ty as Deserialize>::deserialize(reader)?,

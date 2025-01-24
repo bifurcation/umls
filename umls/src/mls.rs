@@ -315,8 +315,8 @@ impl<C: CryptoSizes> MlsGroup<C> for GroupState<C> {
 
         let framed_content = FramedContent {
             group_id: group_context_prev.group_id.clone(),
-            epoch: group_context_prev.epoch.clone(),
-            sender: Sender::Member(self.my_index.clone()),
+            epoch: group_context_prev.epoch,
+            sender: Sender::Member(self.my_index),
             authenticated_data: PrivateMessageAad::default(),
             content: MessageContent::Commit(commit),
         };
@@ -357,7 +357,7 @@ impl<C: CryptoSizes> MlsGroup<C> for GroupState<C> {
 
         let sender_data = SenderData {
             leaf_index: self.my_index,
-            generation: generation,
+            generation,
             reuse_guard: ReuseGuard(rng.gen()),
         };
 
@@ -411,7 +411,7 @@ impl<C: CryptoSizes> MlsGroup<C> for GroupState<C> {
             let group_info_tbs = GroupInfoTbs {
                 group_context: self.group_context.clone(),
                 extensions,
-                confirmation_tag: confirmation_tag,
+                confirmation_tag,
                 signer: self.my_index,
             };
 
@@ -489,7 +489,7 @@ impl<C: CryptoSizes> MlsGroup<C> for GroupState<C> {
 
         self.ratchet_tree.decap(
             &mut self.my_ratchet_tree_priv,
-            &update_path,
+            update_path,
             sender,
             self.my_index,
             &self.group_context,

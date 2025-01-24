@@ -33,7 +33,7 @@ pub trait Deserialize: Sized {
 }
 
 // Serialization by reference
-impl<'a, T> Serialize for &T
+impl<T> Serialize for &T
 where
     T: Serialize,
 {
@@ -226,7 +226,7 @@ impl<const N: usize> AsRef<[u8]> for Raw<N> {
     }
 }
 
-impl<'a, const N: usize> TryFrom<&'a [u8]> for Raw<N> {
+impl<const N: usize> TryFrom<&[u8]> for Raw<N> {
     type Error = Error;
 
     fn try_from(val: &[u8]) -> Result<Self> {
@@ -271,7 +271,7 @@ impl<const N: usize> AsMut<[u8]> for Opaque<N> {
     }
 }
 
-impl<'a, const N: usize> TryFrom<&'a [u8]> for Opaque<N> {
+impl<const N: usize> TryFrom<&[u8]> for Opaque<N> {
     type Error = Error;
 
     fn try_from(val: &[u8]) -> Result<Self> {
