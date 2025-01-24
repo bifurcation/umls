@@ -472,8 +472,7 @@ impl<C: Crypto> RatchetTree<C> {
         let path = self.resolve_path(from);
 
         // Generate path secrets
-        // TODO(RLB) let mut path_secret = HashOutput(Opaque::random(rng));
-        let mut path_secret = HashOutput::<C>::default();
+        let mut path_secret = HashOutput::<C>::random(rng);
         let path_secrets: Vec<_, { consts::MAX_TREE_DEPTH }> = path
             .iter()
             .map(|(n, res)| {

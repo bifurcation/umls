@@ -459,7 +459,7 @@ impl<C: Crypto> PrivateMessage<C> {
         signed_framed_content: SignedFramedContent<C>,
         confirmation_tag: ConfirmationTag<C>,
         sender_data: SenderData,
-        key: AeadKey<C>,
+        mut key: AeadKey<C>,
         nonce: AeadNonce<C>,
         sender_data_secret: &SenderDataSecret<C>,
         authenticated_data: PrivateMessageAad,
@@ -474,6 +474,10 @@ impl<C: Crypto> PrivateMessage<C> {
         };
 
         // Encrypt payload
+        key.as_mut()
+            .iter_mut()
+            .zip(sender_data.reuse_guard.0.iter())
+            .for_each(|(k, r)| *k ^= r);
         let group_id = signed_framed_content.tbs.content.group_id;
         let epoch = signed_framed_content.tbs.content.epoch;
         let aad = PrivateMessageContentAad {
@@ -537,13 +541,17 @@ impl<C: Crypto> PrivateMessage<C> {
         let SenderData {
             leaf_index,
             generation,
-            reuse_guard, // TODO(RLB) Actually apply the reuse guard
+            reuse_guard,
         } = sender_data;
 
         // Look up keys for the sender and generation
-        let (key, nonce) = sender_key_source
+        let (mut key, nonce) = sender_key_source
             .find_keys(leaf_index, generation)
             .ok_or(Error("Unknown sender"))?;
+        key.as_mut()
+            .iter_mut()
+            .zip(reuse_guard.0.iter())
+            .for_each(|(k, r)| *k ^= r);
 
         // Decrypt content
         let aad = PrivateMessageContentAad {
@@ -586,4 +594,24 @@ pub trait SenderKeySource<C: Crypto> {
         sender: LeafIndex,
         generation: Generation,
     ) -> Option<(AeadKey<C>, AeadNonce<C>)>;
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::crypto2::test::RustCryptoX25519;
+
+    fn print_size<T: Serialize>() {
+        println!("{} => {}", core::any::type_name::<T>(), T::MAX_SIZE);
+    }
+
+    #[test]
+    fn object_sizes() {
+        print_size::<GroupSecrets<RustCryptoX25519>>();
+        print_size::<GroupInfo<RustCryptoX25519>>();
+        print_size::<RawPathSecret<RustCryptoX25519>>();
+        print_size::<SenderData>();
+        print_size::<PrivateMessageContent<RustCryptoX25519>>();
+    }
 }

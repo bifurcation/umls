@@ -6,7 +6,6 @@ use crate::syntax2::*;
 use crate::tree_math2::*;
 
 use rand::Rng;
-use rand_core::CryptoRngCore;
 
 /*
                     epoch_secret[n-1]
@@ -77,9 +76,8 @@ pub struct WelcomeSecret<C: Crypto>(HashOutput<C>);
 pub struct EpochAuthenticator<C: Crypto>(HashOutput<C>);
 
 impl<C: Crypto> EpochSecret<C> {
-    pub fn new(rng: &mut (impl Rng + CryptoRngCore)) -> Self {
-        // TODO Self(HashOutput(Opaque::random(rng)))
-        Self(C::HashOutput::default())
+    pub fn new(rng: &mut impl Rng) -> Self {
+        Self(C::HashOutput::random(rng))
     }
 
     pub fn advance(
@@ -160,8 +158,7 @@ impl<C: Crypto> JoinerSecret<C> {
     }
 
     pub fn advance(&self) -> MemberSecret<C> {
-        // TODO let psk_secret = HashOutput(Opaque::zero());
-        let psk_secret = C::HashOutput::default();
+        let psk_secret = C::HashOutput::zero();
         MemberSecret(C::extract(&self.0, &psk_secret))
     }
 }

@@ -5,6 +5,8 @@ use crate::syntax2::*;
 
 use aead::Buffer;
 use core::fmt::Debug;
+use heapless::Vec;
+use rand::Rng;
 use rand_core::CryptoRngCore;
 
 pub trait Hash: Default + Write {
@@ -18,6 +20,27 @@ pub trait Hmac: Write {
 
     fn new(key: &[u8]) -> Self;
     fn finalize(self) -> Self::Output;
+}
+
+pub trait Initializers {
+    fn zero() -> Self;
+    fn random(rng: &mut impl Rng) -> Self;
+}
+
+impl<const N: usize> Initializers for Opaque<N> {
+    fn zero() -> Self {
+        let mut vec = Vec::new();
+        vec.resize_default(N).unwrap();
+        Self(vec)
+    }
+
+    fn random(rng: &mut impl Rng) -> Self {
+        let mut vec = Vec::new();
+        vec.resize_default(N).unwrap();
+        let slice: &mut [u8] = vec.as_mut();
+        rng.fill(slice);
+        Self(vec)
+    }
 }
 
 pub trait Crypto: Clone + PartialEq + Default + Debug {
@@ -44,7 +67,8 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         + Serialize
         + Deserialize
         + for<'a> TryFrom<&'a [u8]>
-        + AsRef<[u8]>;
+        + AsRef<[u8]>
+        + Initializers;
 
     type HpkePrivateKey: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
     type HpkePublicKey: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
@@ -80,7 +104,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         signature_key: &Self::SignaturePublicKey,
     ) -> Result<()>;
 
-    type AeadKey: for<'a> TryFrom<&'a [u8], Error = Error>;
+    type AeadKey: for<'a> TryFrom<&'a [u8], Error = Error> + AsMut<[u8]>;
     type AeadNonce: for<'a> TryFrom<&'a [u8], Error = Error>;
     fn seal(
         buf: &mut impl Buffer,
