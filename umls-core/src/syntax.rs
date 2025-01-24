@@ -193,9 +193,7 @@ impl<T: Deserialize, const N: usize> Deserialize for Vec<T, N> {
         let mut sub_reader = reader.take(len.0)?;
 
         let mut vec = Vec::new();
-        let mut count = 0;
         while !sub_reader.is_empty() {
-            count += 1;
             vec.push(T::deserialize(&mut sub_reader)?)
                 .map_err(|_| Error("Too many elements"))?;
         }

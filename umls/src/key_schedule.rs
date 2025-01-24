@@ -1,9 +1,4 @@
-use crate::common::*;
-use crate::crypto::*;
-use crate::io::*;
-use crate::protocol::*;
-use crate::syntax::*;
-use crate::tree_math::*;
+use umls_core::{common::*, crypto::*, io::*, protocol::*, syntax::*, tree_math::*};
 
 use rand::Rng;
 
@@ -142,8 +137,18 @@ impl<C: Crypto> EpochSecret<C> {
     }
 }
 
-impl<C: Crypto> JoinerSecret<C> {
-    pub fn new(
+pub trait KeyScheduleJoinerSecret<C: Crypto> {
+    fn new(
+        epoch_secret: &EpochSecret<C>,
+        commit_secret: &HashOutput<C>,
+        group_context: &[u8],
+    ) -> Self;
+
+    fn advance(&self) -> MemberSecret<C>;
+}
+
+impl<C: Crypto> KeyScheduleJoinerSecret<C> for JoinerSecret<C> {
+    fn new(
         epoch_secret: &EpochSecret<C>,
         commit_secret: &HashOutput<C>,
         group_context: &[u8],
@@ -157,7 +162,7 @@ impl<C: Crypto> JoinerSecret<C> {
         ))
     }
 
-    pub fn advance(&self) -> MemberSecret<C> {
+    fn advance(&self) -> MemberSecret<C> {
         let psk_secret = C::HashOutput::zero();
         MemberSecret(C::extract(&self.0, &psk_secret))
     }

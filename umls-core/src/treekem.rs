@@ -14,9 +14,6 @@ mod consts {
     pub use crate::protocol::consts::MAX_GROUP_SIZE;
     pub use crate::protocol::consts::MAX_RESOLUTION_SIZE;
     pub use crate::protocol::consts::MAX_TREE_DEPTH;
-
-    pub const MAX_NODE_WIDTH: usize = 2 * MAX_GROUP_SIZE - 1;
-    pub const ROOT_NODE_INDEX: usize = MAX_GROUP_SIZE - 1;
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -147,15 +144,6 @@ enum Node<C: Crypto> {
 
     #[discriminant = "2"]
     Parent(ParentNode<C>),
-}
-
-impl<C: Crypto> Node<C> {
-    fn encryption_key(&self) -> &HpkePublicKey<C> {
-        match self {
-            Node::Leaf(leaf) => &leaf.tbs.encryption_key,
-            Node::Parent(parent) => &parent.public_key,
-        }
-    }
 }
 
 struct ParentIndex(usize);
@@ -478,7 +466,7 @@ impl<C: Crypto> RatchetTree<C> {
         let mut path_secret = HashOutput::<C>::random(rng);
         let path_secrets: Vec<_, { consts::MAX_TREE_DEPTH }> = path
             .iter()
-            .map(|(n, res)| {
+            .map(|(_n, res)| {
                 if res.is_empty() {
                     None
                 } else {
@@ -640,7 +628,7 @@ impl<C: Crypto> RatchetTree<C> {
             .map(|ps| {
                 let ps = ps.as_ref().unwrap();
                 let decrypt_node_secret = C::derive_secret(&ps.0, b"node");
-                let (encryption_priv, encryption_key) = C::hpke_derive(&decrypt_node_secret)?;
+                let (encryption_priv, _encryption_key) = C::hpke_derive(&decrypt_node_secret)?;
 
                 Ok(encryption_priv)
             })
@@ -690,7 +678,6 @@ impl<C: Crypto> RatchetTree<C> {
 
     fn parent_hash_now(
         &mut self,
-        n: NodeIndex,
         last_parent: Option<NodeIndex>,
         from: LeafIndex,
     ) -> Result<HashOutput<C>> {
@@ -723,18 +710,16 @@ impl<C: Crypto> RatchetTree<C> {
         C: DependentSizes,
     {
         let path = self.resolve_path(from);
-        let curr = NodeIndex::from(from);
-        let width = NodeCount::from(self.size());
-
         let filtered_path = path
             .iter()
             .filter(|(_, res)| !res.is_empty())
             .map(|(n, _)| *n);
+
         let keys = nodes.iter().map(|n| n.encryption_key.clone());
         let index_key_pairs: Vec<_, { consts::MAX_TREE_DEPTH }> = filtered_path.zip(keys).collect();
         let mut last_parent: Option<NodeIndex> = None;
         for (n, public_key) in index_key_pairs.iter().rev() {
-            let parent_hash = self.parent_hash_now(*n, last_parent, from)?;
+            let parent_hash = self.parent_hash_now(last_parent, from)?;
             last_parent.replace(*n);
 
             *self.parent_node_at_mut(ParentIndex::try_from(*n).unwrap()) = Some(ParentNode {
@@ -744,7 +729,7 @@ impl<C: Crypto> RatchetTree<C> {
             });
         }
 
-        self.parent_hash_now(from.into(), last_parent, from)
+        self.parent_hash_now(last_parent, from)
     }
 
     fn original_tree_hash(

@@ -1,11 +1,7 @@
-use crate::common::*;
-use crate::crypto::*;
-use crate::io::*;
+use umls_core::{common::*, crypto::*, io::*, protocol::*, syntax::*, treekem::*};
+
 use crate::key_schedule::*;
-use crate::protocol::*;
-use crate::syntax::*;
 use crate::transcript_hash::InterimTranscriptHash;
-use crate::treekem::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GroupState<C: Crypto> {

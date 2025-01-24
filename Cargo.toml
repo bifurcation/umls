@@ -1,50 +1,8 @@
-[package]
-name = "umls"
-version = "0.1.0"
-edition = "2021"
-
-[features]
-x25519_aes128gcm_ed25519 = []
-rust_crypto = []
-stack_measurement = []
-default = ["x25519_aes128gcm_ed25519", "rust_crypto", "stack_measurement"]
-
-[profile.dev]
-#opt-level = "s"
-
-# TODO(RLB) Groom dependencies, make most of these optional, conditional on features
-[dependencies]
-derive-serialize = { path = "derive-serialize" }
-
-heapless = "0.8.0"
-hex-literal = "0.4.1"
-hex = "0.4.3"
-hybrid-array = "0.2.3"
-
-# Random
-getrandom = { version = "0.2", default-features = false, optional = true }
-rand_core = { version = "0.6", default-features = false, features = ["alloc"] }
-
-# AEAD
-aes-gcm = { version = "0.10", features = ["heapless", "zeroize"] }
-chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc", "getrandom"] }
-aead = { version = "0.5", default-features = false, features = ["alloc", "getrandom"] }
-
-# Hash
-sha2 = { version = "0.10", default-features = false }
-
-hmac = { version = "0.12", default-features = false, features = ["reset"] }
-
-# KEM
-p256 = { version = "0.13", default-features = false, features = ["alloc", "ecdh", "ecdsa", "pem"] }
-p384 = { version = "0.13", default-features = false, features = ["alloc", "ecdh", "ecdsa", "pem"] }
-x25519-dalek = { version = "2", default-features = false, features = ["alloc", "static_secrets"] }
-ed25519-dalek = { version = "2", default-features = false, features = ["alloc", "rand_core"] }
-sec1 = { version = "0.7", default-features = false, features = ["alloc"] }
-rand = "0.8.5"
-itertools = { version = "0.14.0", default-features = false }
-
-[dev-dependencies]
-rand = "0.8.5"
-rand_chacha = "0.3.1"
-tabled = "0.17.0"
+[workspace]
+resolver = "2"
+members = [
+    "umls-core",
+    "derive-serialize",
+    "umls-rust-crypto",
+    "umls",
+]

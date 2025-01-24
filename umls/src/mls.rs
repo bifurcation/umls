@@ -1,11 +1,14 @@
-use crate::common::*;
-use crate::crypto::*;
+use umls_core::{
+    common::*,
+    crypto::*,
+    protocol::{self, *},
+    syntax::*,
+    treekem::*,
+};
+
 use crate::group_state::*;
 use crate::key_schedule::*;
-use crate::protocol::{self, *};
-use crate::syntax::*;
 use crate::transcript_hash;
-use crate::treekem::*;
 
 use heapless::Vec;
 use rand::Rng;
@@ -521,12 +524,12 @@ impl<C: CryptoSizes> MlsGroup<C> for GroupState<C> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "std_rng"))]
 mod test {
     use super::*;
 
-    use crate::crypto::test::RustCryptoX25519;
     use rand::{seq::SliceRandom, SeedableRng};
+    use umls_rust_crypto::RustCryptoX25519;
 
     fn make_user(
         rng: &mut (impl CryptoRngCore + Rng),

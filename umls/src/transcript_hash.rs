@@ -1,8 +1,10 @@
-use crate::common::*;
-use crate::crypto::*;
-use crate::io::*;
-use crate::protocol::{self, *};
-use crate::syntax::*;
+use umls_core::{
+    common::*,
+    crypto::*,
+    io::*,
+    protocol::{self, *},
+    syntax::*,
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct InterimTranscriptHash<C: Crypto>(HashOutput<C>);
