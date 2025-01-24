@@ -6,3 +6,6 @@ members = [
     "umls-rust-crypto",
     "umls",
 ]
+
+[profile.dev]
+opt-level = "s"

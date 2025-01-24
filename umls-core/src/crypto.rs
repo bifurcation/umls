@@ -1,6 +1,7 @@
 use crate::common::*;
 use crate::io::*;
 use crate::protocol::CipherSuite;
+use crate::stack;
 use crate::syntax::*;
 
 use aead::Buffer;
@@ -29,12 +30,14 @@ pub trait Initializers {
 
 impl<const N: usize> Initializers for Opaque<N> {
     fn zero() -> Self {
+        stack::update();
         let mut vec = Vec::new();
         vec.resize_default(N).unwrap();
         Self(vec)
     }
 
     fn random(rng: &mut impl Rng) -> Self {
+        stack::update();
         let mut vec = Vec::new();
         vec.resize_default(N).unwrap();
         let slice: &mut [u8] = vec.as_mut();
@@ -120,16 +123,19 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
     ) -> Result<()>;
 
     fn hmac(key: &[u8], data: &[u8]) -> Self::HashOutput {
+        stack::update();
         let mut hmac = Self::Hmac::new(key);
         hmac.write(data).unwrap();
         hmac.finalize()
     }
 
     fn derive_secret(secret: &Self::HashOutput, label: &'static [u8]) -> Self::HashOutput {
+        stack::update();
         Self::expand_with_label(secret, label, &[])
     }
 
     fn extract(salt: &Self::HashOutput, ikm: &Self::HashOutput) -> Self::HashOutput {
+        stack::update();
         Self::hmac(salt.as_ref(), ikm.as_ref())
     }
 
@@ -139,6 +145,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         context: &[u8],
         len: u16,
     ) -> Self::HashOutput {
+        stack::update();
         // We never need more than one block of output
         //   T(0) = empty string (zero length)
         //   T(1) = HMAC-Hash(PRK, T(0) | info | 0x01)
@@ -167,10 +174,12 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         label: &'static [u8],
         context: &[u8],
     ) -> Self::HashOutput {
+        stack::update();
         Self::expand_with_label_full(secret, label, context, Self::HASH_OUTPUT_SIZE as u16)
     }
 
     fn welcome_key_nonce(secret: &Self::HashOutput) -> (Self::AeadKey, Self::AeadNonce) {
+        stack::update();
         let key_data =
             Self::expand_with_label_full(secret, b"key", &[], Self::AEAD_KEY_SIZE as u16);
         let nonce_data =
@@ -189,6 +198,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         sender_data_secret: &Self::HashOutput,
         ciphertext: &[u8],
     ) -> (Self::AeadKey, Self::AeadNonce) {
+        stack::update();
         let ciphertext_sample = &ciphertext[..Self::HASH_OUTPUT_SIZE];
 
         let key_data = Self::expand_with_label_full(
@@ -217,6 +227,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         secret: &Self::HashOutput,
         generation: u32,
     ) -> (Self::AeadKey, Self::AeadNonce) {
+        stack::update();
         let generation = generation.to_be_bytes();
         let key_data = Self::expand_with_label_full(
             secret,
@@ -241,6 +252,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
     }
 
     fn hash_ref(label: &'static [u8], value: &impl Serialize) -> Result<Self::HashOutput> {
+        stack::update();
         let mut h = Self::Hash::default();
 
         Varint(label.len()).serialize(&mut h)?;
@@ -256,6 +268,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
     }
 
     fn signature_digest(message: &impl Serialize, label: &[u8]) -> Result<Self::HashOutput> {
+        stack::update();
         let mut h = Self::Hash::default();
 
         Varint(label.len()).serialize(&mut h)?;
@@ -275,6 +288,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         label: &[u8],
         sig_priv: &Self::SignaturePrivateKey,
     ) -> Result<Self::Signature> {
+        stack::update();
         let digest = Self::signature_digest(message, label)?;
         Self::sign(digest.as_ref(), &sig_priv)
     }
@@ -285,6 +299,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         signature: &Self::Signature,
         sig_key: &Self::SignaturePublicKey,
     ) -> Result<()> {
+        stack::update();
         let digest = Self::signature_digest(message, label)?;
         Self::verify(digest.as_ref(), signature, sig_key)
     }
@@ -383,16 +398,19 @@ where
     Signed<T, C>: SignatureLabel,
 {
     pub fn sign(tbs: T, sig_priv: &C::SignaturePrivateKey) -> Result<Self> {
+        stack::update();
         let signature = C::sign_with_label(&tbs, Self::SIGNATURE_LABEL, sig_priv)?;
         Ok(Self { tbs, signature })
     }
 
     pub fn re_sign(&mut self, sig_priv: &C::SignaturePrivateKey) -> Result<()> {
+        stack::update();
         self.signature = C::sign_with_label(&self.tbs, Self::SIGNATURE_LABEL, sig_priv)?;
         Ok(())
     }
 
     pub fn verify(&self, sig_key: &C::SignaturePublicKey) -> Result<()> {
+        stack::update();
         C::verify_with_label(&self.tbs, Self::SIGNATURE_LABEL, &self.signature, sig_key)
     }
 }
@@ -403,6 +421,7 @@ where
     E: Default + AsRef<[u8]> + Write + Buffer,
 {
     fn seal(&self, key: &AeadKey<C>, nonce: &AeadNonce<C>, aad: &[u8]) -> Result<E> {
+        stack::update();
         let mut buf = E::default();
         self.serialize(&mut buf)?;
         C::seal(&mut buf, key, nonce, aad)?;
@@ -410,6 +429,7 @@ where
     }
 
     fn open(mut buf: E, key: &AeadKey<C>, nonce: &AeadNonce<C>, aad: &[u8]) -> Result<Self> {
+        stack::update();
         C::open(&mut buf, key, nonce, aad)?;
         Self::deserialize(&mut buf.as_ref())
     }
@@ -436,6 +456,7 @@ where
         encryption_key: &HpkePublicKey<C>,
         aad: &[u8],
     ) -> Result<HpkeCiphertext<C, E>> {
+        stack::update();
         let (kem_output, kem_secret) = C::hpke_encap(rng, &encryption_key);
         let (key, nonce) = C::hpke_key_nonce(kem_secret);
         let ciphertext = self.seal(&key, &nonce, aad)?;
@@ -450,6 +471,7 @@ where
         encryption_priv: &HpkePrivateKey<C>,
         aad: &[u8],
     ) -> Result<Self> {
+        stack::update();
         let kem_secret = C::hpke_decap(encryption_priv, &ct.kem_output);
         let (key, nonce) = C::hpke_key_nonce(kem_secret);
         Self::open(ct.ciphertext, &key, &nonce, aad)

@@ -3,6 +3,7 @@ use umls_core::{
     crypto::*,
     io::*,
     protocol::{self, *},
+    stack,
     syntax::*,
 };
 
@@ -14,6 +15,7 @@ pub fn confirmed<C: CryptoSizes>(
     content: &FramedContent<C>,
     signature: &Signature<C>,
 ) -> Result<ConfirmedTranscriptHash<C>> {
+    stack::update();
     let mut h = C::Hash::default();
 
     h.write(interim_transcript_hash.0.as_ref())?;
@@ -28,6 +30,7 @@ pub fn interim<C: Crypto>(
     confirmed_transcript_hash: &ConfirmedTranscriptHash<C>,
     confirmation_tag: &ConfirmationTag<C>,
 ) -> Result<InterimTranscriptHash<C>> {
+    stack::update();
     let mut h = C::Hash::default();
 
     h.write(confirmed_transcript_hash.0.as_ref())?;

@@ -5,8 +5,8 @@ edition = "2021"
 
 [features]
 std_rng = ["rand/std", "rand/std_rng"]
-stack_measurement = []
-default = ["stack_measurement"]
+stack = ["umls-core/stack"]
+default = []
 
 [dependencies]
 umls-core = { path = "../umls-core" }

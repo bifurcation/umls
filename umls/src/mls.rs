@@ -2,6 +2,7 @@ use umls_core::{
     common::*,
     crypto::*,
     protocol::{self, *},
+    stack,
     syntax::*,
     treekem::*,
 };
@@ -20,6 +21,7 @@ pub fn make_key_package<C: CryptoSizes>(
     signature_key: SignaturePublicKey<C>,
     credential: Credential,
 ) -> Result<(KeyPackagePriv<C>, KeyPackage<C>)> {
+    stack::update();
     let (encryption_priv, encryption_key) = C::hpke_generate(rng)?;
     let (init_priv, init_key) = C::hpke_generate(rng)?;
 
@@ -93,6 +95,7 @@ impl<C: CryptoSizes> MlsGroup<C> for GroupState<C> {
         key_package: KeyPackage<C>,
         group_id: GroupId,
     ) -> Result<GroupState<C>> {
+        stack::update();
         // Construct the ratchet tree
         let mut ratchet_tree = RatchetTree::default();
         ratchet_tree.add_leaf(key_package.tbs.leaf_node)?;
@@ -138,6 +141,7 @@ impl<C: CryptoSizes> MlsGroup<C> for GroupState<C> {
         key_package: KeyPackage<C>,
         welcome: Welcome<C>,
     ) -> Result<GroupState<C>> {
+        stack::update();
         // Verify that the Welcome is for us
         let kp_ref = C::hash_ref(b"MLS 1.0 KeyPackage Reference", &key_package)?;
         if welcome.secrets[0].new_member != HashRef(kp_ref) {
@@ -242,6 +246,7 @@ impl<C: CryptoSizes> MlsGroup<C> for GroupState<C> {
         rng: &mut (impl Rng + CryptoRngCore),
         operation: Operation<C>,
     ) -> Result<(PrivateMessage<C>, Option<Welcome<C>>)> {
+        stack::update();
         // Snapshot off required bits of the previous state
         let group_context_prev = self.group_context.clone();
         let epoch_secret_prev = self.epoch_secret.clone();
@@ -426,6 +431,7 @@ impl<C: CryptoSizes> MlsGroup<C> for GroupState<C> {
     }
 
     fn handle_commit(&mut self, commit: PrivateMessage<C>) -> Result<()> {
+        stack::update();
         // Unwrap the PrivateMessage and verify its signature
         let sender_data_secret = self.epoch_secret.sender_data_secret();
         let (signed_framed_content, confirmation_tag_message) =
@@ -552,6 +558,7 @@ mod test {
 
     impl TestGroup {
         fn new(group_id: &[u8], creator_name: &[u8]) -> Self {
+            stack::update();
             let mut rng = rand::thread_rng();
 
             let group_id = GroupId(Opaque::try_from(group_id).unwrap());
@@ -568,6 +575,7 @@ mod test {
         }
 
         fn add(&mut self, committer: usize, joiner_name: &[u8]) -> usize {
+            stack::update();
             let mut rng = rand::thread_rng();
 
             let (kp_priv, kp) = make_user(&mut rng, joiner_name);

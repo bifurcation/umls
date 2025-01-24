@@ -1,4 +1,4 @@
-use umls_core::{common::*, crypto::*, io::*, protocol::*, syntax::*, tree_math::*};
+use umls_core::{common::*, crypto::*, io::*, protocol::*, stack, syntax::*, tree_math::*};
 
 use rand::Rng;
 
@@ -72,6 +72,7 @@ pub struct EpochAuthenticator<C: Crypto>(HashOutput<C>);
 
 impl<C: Crypto> EpochSecret<C> {
     pub fn new(rng: &mut impl Rng) -> Self {
+        stack::update();
         Self(C::HashOutput::random(rng))
     }
 
@@ -80,6 +81,7 @@ impl<C: Crypto> EpochSecret<C> {
         commit_secret: &HashOutput<C>,
         group_context: &GroupContext<C>,
     ) -> Result<(JoinerSecret<C>, AeadKey<C>, AeadNonce<C>)> {
+        stack::update();
         let group_context = group_context.materialize()?;
 
         let joiner_secret = JoinerSecret::new(&self, commit_secret, &group_context);
@@ -94,6 +96,7 @@ impl<C: Crypto> EpochSecret<C> {
         &self,
         confirmed_transcript_hash: &ConfirmedTranscriptHash<C>,
     ) -> ConfirmationTag<C> {
+        stack::update();
         let confirmation_key = C::derive_secret(&self.0, b"confirm");
 
         ConfirmationTag(C::hmac(
@@ -103,10 +106,12 @@ impl<C: Crypto> EpochSecret<C> {
     }
 
     pub fn epoch_authenticator(&self) -> EpochAuthenticator<C> {
+        stack::update();
         EpochAuthenticator(C::derive_secret(&self.0, b"authentication"))
     }
 
     pub fn sender_data_secret(&self) -> SenderDataSecret<C> {
+        stack::update();
         SenderDataSecret(C::derive_secret(&self.0, b"sender data"))
     }
 
@@ -116,6 +121,7 @@ impl<C: Crypto> EpochSecret<C> {
         index: LeafIndex,
         group_size: LeafCount,
     ) -> (Generation, AeadKey<C>, AeadNonce<C>) {
+        stack::update();
         let mut parent = group_size.root();
         let mut tree_secret = C::derive_secret(&self.0, b"encryption");
 
@@ -153,6 +159,7 @@ impl<C: Crypto> KeyScheduleJoinerSecret<C> for JoinerSecret<C> {
         commit_secret: &HashOutput<C>,
         group_context: &[u8],
     ) -> Self {
+        stack::update();
         let init_secret = C::derive_secret(&epoch_secret.0, b"init");
         let pre_joiner_secret = C::extract(&init_secret, &commit_secret);
         Self(C::expand_with_label(
@@ -163,6 +170,7 @@ impl<C: Crypto> KeyScheduleJoinerSecret<C> for JoinerSecret<C> {
     }
 
     fn advance(&self) -> MemberSecret<C> {
+        stack::update();
         let psk_secret = C::HashOutput::zero();
         MemberSecret(C::extract(&self.0, &psk_secret))
     }
@@ -170,11 +178,13 @@ impl<C: Crypto> KeyScheduleJoinerSecret<C> for JoinerSecret<C> {
 
 impl<C: Crypto> MemberSecret<C> {
     pub fn welcome_key_nonce(&self) -> (AeadKey<C>, AeadNonce<C>) {
+        stack::update();
         let welcome_secret = C::derive_secret(&self.0, b"welcome");
         C::welcome_key_nonce(&welcome_secret)
     }
 
     pub fn advance(&self, group_context: &[u8]) -> EpochSecret<C> {
+        stack::update();
         EpochSecret(C::expand_with_label(&self.0, b"epoch", &group_context))
     }
 }

@@ -1,5 +1,6 @@
 use crate::common::*;
 use crate::io::*;
+use crate::stack;
 
 use heapless::Vec;
 
@@ -19,6 +20,7 @@ pub trait Materialize: Serialize {
 
     /// Create an owned object containing a serialized version of this object
     fn materialize(&self) -> Result<Self::Storage> {
+        stack::update();
         let mut storage = Self::Storage::default();
         self.serialize(&mut storage)?;
         Ok(storage)
@@ -38,6 +40,7 @@ where
     const MAX_SIZE: usize = T::MAX_SIZE;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        stack::update();
         Serialize::serialize(*self, writer)
     }
 }
@@ -52,12 +55,14 @@ macro_rules! impl_primitive_serde {
             const MAX_SIZE: usize = core::mem::size_of::<$t>();
 
             fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+                stack::update();
                 writer.write(&self.to_be_bytes())
             }
         }
 
         impl Deserialize for $t {
             fn deserialize(reader: &mut impl Read) -> Result<Self> {
+                stack::update();
                 const N: usize = core::mem::size_of::<$t>();
                 let mut bytes = [0; N];
                 bytes.copy_from_slice(reader.read(N)?);
@@ -80,6 +85,7 @@ where
     const MAX_SIZE: usize = 1 + T::MAX_SIZE;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        stack::update();
         match self {
             Some(val) => {
                 writer.write(&[1])?;
@@ -95,6 +101,7 @@ where
     T: Deserialize,
 {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
+        stack::update();
         match u8::deserialize(reader)? {
             0 => Ok(None),
             1 => Ok(Some(T::deserialize(reader)?)),
@@ -108,12 +115,14 @@ impl<const N: usize> Serialize for [u8; N] {
     const MAX_SIZE: usize = N;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        stack::update();
         writer.write(self)
     }
 }
 
 impl<const N: usize> Deserialize for [u8; N] {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
+        stack::update();
         let mut arr = [0; N];
         arr.copy_from_slice(reader.read(N)?);
         Ok(arr)
@@ -139,6 +148,7 @@ impl Serialize for Varint {
     const MAX_SIZE: usize = 4;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        stack::update();
         match Self::size(self.0) {
             1 => (self.0 as u8).serialize(writer),
             2 => (0x4000 | self.0 as u16).serialize(writer),
@@ -150,6 +160,7 @@ impl Serialize for Varint {
 
 impl Deserialize for Varint {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
+        stack::update();
         let first_byte = reader.peek()?;
         let len = 1 << usize::from(first_byte >> 6);
 
@@ -173,6 +184,7 @@ impl<T: Serialize, const N: usize> Serialize for Vec<T, N> {
     const MAX_SIZE: usize = Varint::size(N * T::MAX_SIZE) + (N * T::MAX_SIZE);
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        stack::update();
         let mut count = CountWriter::default();
         for val in self.iter() {
             val.serialize(&mut count)?;
@@ -189,6 +201,7 @@ impl<T: Serialize, const N: usize> Serialize for Vec<T, N> {
 
 impl<T: Deserialize, const N: usize> Deserialize for Vec<T, N> {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
+        stack::update();
         let len = Varint::deserialize(reader)?;
         let mut sub_reader = reader.take(len.0)?;
 
@@ -208,6 +221,7 @@ pub struct Raw<const N: usize>(pub Vec<u8, N>);
 
 impl<const N: usize> AsRef<[u8]> for Raw<N> {
     fn as_ref(&self) -> &[u8] {
+        stack::update();
         self.0.as_ref()
     }
 }
@@ -216,6 +230,7 @@ impl<'a, const N: usize> TryFrom<&'a [u8]> for Raw<N> {
     type Error = Error;
 
     fn try_from(val: &[u8]) -> Result<Self> {
+        stack::update();
         let vec = Vec::try_from(val).map_err(|_| Error("Size error"))?;
         Ok(Self(vec))
     }
@@ -225,12 +240,14 @@ impl<const N: usize> Serialize for Raw<N> {
     const MAX_SIZE: usize = N;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        stack::update();
         writer.write(&self.0)
     }
 }
 
 impl<const N: usize> Deserialize for Raw<N> {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
+        stack::update();
         let vec = Vec::from_slice(reader.read(N)?).map_err(|_| Error("Too many elements"))?;
         Ok(Self(vec))
     }
@@ -242,12 +259,14 @@ pub struct Opaque<const N: usize>(pub Vec<u8, N>);
 
 impl<const N: usize> AsRef<[u8]> for Opaque<N> {
     fn as_ref(&self) -> &[u8] {
+        stack::update();
         self.0.as_ref()
     }
 }
 
 impl<const N: usize> AsMut<[u8]> for Opaque<N> {
     fn as_mut(&mut self) -> &mut [u8] {
+        stack::update();
         self.0.as_mut()
     }
 }
@@ -256,6 +275,7 @@ impl<'a, const N: usize> TryFrom<&'a [u8]> for Opaque<N> {
     type Error = Error;
 
     fn try_from(val: &[u8]) -> Result<Self> {
+        stack::update();
         let vec = Vec::try_from(val).map_err(|_| Error("Size error"))?;
         Ok(Self(vec))
     }
@@ -265,6 +285,7 @@ impl<const N: usize> Serialize for Opaque<N> {
     const MAX_SIZE: usize = Varint::size(N) + N;
 
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        stack::update();
         Varint(self.0.len()).serialize(writer)?;
         writer.write(&self.0)
     }
@@ -272,6 +293,7 @@ impl<const N: usize> Serialize for Opaque<N> {
 
 impl<const N: usize> Deserialize for Opaque<N> {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
+        stack::update();
         let len = Varint::deserialize(reader)?;
 
         let vec = Vec::from_slice(reader.read(len.0)?).map_err(|_| Error("Too many elements"))?;

@@ -1,4 +1,5 @@
 use crate::common::*;
+use crate::stack;
 
 use heapless::Vec;
 
@@ -40,6 +41,8 @@ pub trait ReadRef<'a>: Sized {
 
 impl<const N: usize> Write for Vec<u8, N> {
     fn write(&mut self, data: &[u8]) -> Result<()> {
+        stack::update();
+        stack::update();
         self.extend_from_slice(data)
             .map_err(|_| Error("Insufficient capacity"))
     }
@@ -47,6 +50,8 @@ impl<const N: usize> Write for Vec<u8, N> {
 
 impl<'a> Read for &'a [u8] {
     fn read(&mut self, n: usize) -> Result<&[u8]> {
+        stack::update();
+        stack::update();
         if self.len() < n {
             return Err(Error("Insufficient data"));
         }
@@ -57,11 +62,15 @@ impl<'a> Read for &'a [u8] {
     }
 
     fn is_empty(&self) -> bool {
+        stack::update();
+        stack::update();
         <[u8]>::is_empty(self)
     }
 
     // XXX(RLB) This overlaps with read(), but can't be shared because of some lifetime issues
     fn take(&mut self, n: usize) -> Result<Self> {
+        stack::update();
+        stack::update();
         if self.len() < n {
             return Err(Error("Insufficient data"));
         }
@@ -72,6 +81,8 @@ impl<'a> Read for &'a [u8] {
     }
 
     fn peek(&self) -> Result<u8> {
+        stack::update();
+        stack::update();
         if self.is_empty() {
             return Err(Error("Insufficient data"));
         }
@@ -86,18 +97,21 @@ pub struct CountWriter {
 
 impl Default for CountWriter {
     fn default() -> Self {
+        stack::update();
         Self { len: 0 }
     }
 }
 
 impl CountWriter {
     pub fn len(&self) -> usize {
+        stack::update();
         self.len
     }
 }
 
 impl Write for CountWriter {
     fn write(&mut self, data: &[u8]) -> Result<()> {
+        stack::update();
         self.len += data.len();
         Ok(())
     }
@@ -107,6 +121,7 @@ pub struct SliceReader<'a>(pub &'a [u8]);
 
 impl<'a> ReadRef<'a> for SliceReader<'a> {
     fn read_ref(&mut self, n: usize) -> Result<&'a [u8]> {
+        stack::update();
         if self.0.len() < n {
             return Err(Error("Insufficient data"));
         }
@@ -117,14 +132,17 @@ impl<'a> ReadRef<'a> for SliceReader<'a> {
     }
 
     fn is_empty(&self) -> bool {
+        stack::update();
         self.0.is_empty()
     }
 
     fn take(&mut self, n: usize) -> Result<Self> {
+        stack::update();
         Ok(Self(self.read_ref(n)?))
     }
 
     fn peek(&self) -> Result<u8> {
+        stack::update();
         if self.is_empty() {
             Err(Error("Insufficient data"))
         } else {

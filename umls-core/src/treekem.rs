@@ -2,6 +2,7 @@ use crate::common::*;
 use crate::crypto::*;
 use crate::io::*;
 use crate::protocol::*;
+use crate::stack;
 use crate::syntax::*;
 use crate::tree_math::*;
 
@@ -31,6 +32,7 @@ impl<C: Crypto> RatchetTreePriv<C> {
         path_secret: Option<PathSecret<C>>,
         encryption_priv: HpkePrivateKey<C>,
     ) -> Result<Self> {
+        stack::update();
         let mut path_secrets = Vec::default();
 
         if let Some(path_secret) = path_secret {
@@ -76,10 +78,12 @@ impl<C: Crypto> RatchetTreePriv<C> {
     }
 
     pub fn commit_secret(&self) -> HashOutput<C> {
+        stack::update();
         self.commit_secret.clone()
     }
 
     pub fn consistent(&self, ratchet_tree: &RatchetTree<C>, my_index: LeafIndex) -> bool {
+        stack::update();
         let width: NodeCount = ratchet_tree.size().into();
         let encryption_key = C::hpke_priv_to_pub(&self.encryption_priv);
         if ratchet_tree
@@ -152,6 +156,7 @@ impl TryFrom<NodeIndex> for ParentIndex {
     type Error = Error;
 
     fn try_from(val: NodeIndex) -> Result<Self> {
+        stack::update();
         if val.is_leaf() {
             return Err(Error("Malformed index"));
         }
@@ -175,6 +180,7 @@ impl<C: Crypto> Serialize for RatchetTree<C> {
 
     // Serialize Vec<Option<Node>> without materializing it
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
+        stack::update();
         let mut counter = CountWriter::default();
         for node in self.node_iter() {
             node.serialize(&mut counter)?;
@@ -192,6 +198,7 @@ impl<C: Crypto> Serialize for RatchetTree<C> {
 
 impl<C: Crypto> Deserialize for RatchetTree<C> {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
+        stack::update();
         let len = Varint::deserialize(reader)?;
 
         let mut content = reader.take(len.0)?;
@@ -236,6 +243,7 @@ impl<C: Crypto> RatchetTree<C> {
         Varint::size(Self::MAX_LEAF_NODES_SIZE + Self::MAX_PARENT_NODES_SIZE);
 
     fn node_iter<'a>(&'a self) -> impl Iterator<Item = Option<Node<C>>> + use<'a, C> {
+        stack::update();
         let n_trailing_blanks = self
             .leaf_nodes
             .iter()
@@ -258,22 +266,27 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     pub fn leaf_node_at(&self, i: LeafIndex) -> &Option<LeafNode<C>> {
+        stack::update();
         &self.leaf_nodes[i.0 as usize]
     }
 
     fn parent_node_at(&self, i: ParentIndex) -> &Option<ParentNode<C>> {
+        stack::update();
         &self.parent_nodes[i.0]
     }
 
     fn leaf_node_at_mut(&mut self, i: LeafIndex) -> &mut Option<LeafNode<C>> {
+        stack::update();
         &mut self.leaf_nodes[i.0 as usize]
     }
 
     fn parent_node_at_mut(&mut self, i: ParentIndex) -> &mut Option<ParentNode<C>> {
+        stack::update();
         &mut self.parent_nodes[i.0]
     }
 
     fn encryption_key_at<'a>(&'a self, n: NodeIndex) -> Option<&'a HpkePublicKey<C>> {
+        stack::update();
         // TODO(RLB) Find a way to do this with match, maybe by making NodeIndex an enum?
         if let Ok(n) = LeafIndex::try_from(n) {
             self.leaf_node_at(n)
@@ -286,6 +299,7 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     fn parent_hash_at(&self, n: NodeIndex) -> Option<HashOutput<C>> {
+        stack::update();
         // TODO(RLB) Find a way to do this with match, maybe by making NodeIndex an enum?
         if let Ok(n) = LeafIndex::try_from(n) {
             self.leaf_node_at(n)
@@ -303,10 +317,12 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     pub fn size(&self) -> LeafCount {
+        stack::update();
         LeafCount(self.leaf_nodes.len())
     }
 
     pub fn find(&self, target: &LeafNode<C>) -> Option<LeafIndex> {
+        stack::update();
         let target = Some(target.clone());
         self.leaf_nodes
             .iter()
@@ -315,6 +331,7 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     pub fn add_leaf(&mut self, leaf_node: LeafNode<C>) -> Result<LeafIndex> {
+        stack::update();
         // Assign to a blank leaf node if one exists
         let blank = self
             .leaf_nodes
@@ -356,6 +373,7 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     pub fn remove_leaf(&mut self, removed: LeafIndex) -> Result<()> {
+        stack::update();
         if self.leaf_node_at(removed.into()).is_none() {
             return Err(Error("Member not in group"));
         }
@@ -366,10 +384,12 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     pub fn root_hash(&self) -> Result<TreeHash<C>> {
+        stack::update();
         self.hash(self.size().root()).map(|h| TreeHash(h))
     }
 
     fn hash(&self, index: NodeIndex) -> Result<HashOutput<C>> {
+        stack::update();
         if index.is_leaf() {
             self.leaf_hash(index)
         } else {
@@ -378,6 +398,7 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     fn leaf_hash(&self, index: NodeIndex) -> Result<HashOutput<C>> {
+        stack::update();
         // struct {
         //     uint32 leaf_index;
         //     optional<LeafNode> leaf_node;
@@ -394,6 +415,7 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     fn parent_hash(&self, index: NodeIndex) -> Result<HashOutput<C>> {
+        stack::update();
         // struct {
         //     optional<ParentNode> parent_node;
         //     opaque left_hash<V>;
@@ -411,6 +433,7 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     fn expand(&mut self) -> Result<()> {
+        stack::update();
         let leaf_width = if self.leaf_nodes.is_empty() {
             1
         } else {
@@ -573,6 +596,7 @@ impl<C: Crypto> RatchetTree<C> {
         from: LeafIndex,
         to: LeafIndex,
     ) -> Result<PathSecret<C>> {
+        stack::update();
         let path = self.resolve_path(from);
         let parent_index = path.iter().position(|(n, _)| n.is_above_or_eq(to)).unwrap();
         ratchet_tree_priv.path_secrets[parent_index]
@@ -681,6 +705,7 @@ impl<C: Crypto> RatchetTree<C> {
         last_parent: Option<NodeIndex>,
         from: LeafIndex,
     ) -> Result<HashOutput<C>> {
+        stack::update();
         let Some(p) = last_parent else {
             // Parent hash of the root is an empty byte string
             return Ok(HashOutput::<C>::default());
@@ -738,6 +763,7 @@ impl<C: Crypto> RatchetTree<C> {
         index: NodeIndex,
         parent_except: &[LeafIndex],
     ) -> Result<HashOutput<C>> {
+        stack::update();
         // Scope the unmerged leaves list down to this subtree
         let local_except: Vec<_, { consts::MAX_RESOLUTION_SIZE }> = parent_except
             .iter()
@@ -801,6 +827,7 @@ impl<C: Crypto> RatchetTree<C> {
         parent: NodeIndex,
         sibling: NodeIndex,
     ) -> Result<HashOutput<C>> {
+        stack::update();
         let parent_index = ParentIndex::try_from(parent).unwrap();
         let Some(parent_node) = self.parent_node_at(parent_index) else {
             unreachable!();
@@ -816,6 +843,7 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     fn has_parent_hash(&self, node: NodeIndex, target_hash: HashOutput<C>) -> bool {
+        stack::update();
         self.resolve(node)
             .iter()
             .filter_map(|&n| self.parent_hash_at(n))
@@ -823,6 +851,7 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     pub fn parent_hash_valid(&self) -> Result<bool> {
+        stack::update();
         let mut cache = TreeHashCache::<C>::new();
 
         let width: NodeCount = self.size().into();
@@ -856,6 +885,7 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     fn resolve_path(&self, leaf_node: LeafIndex) -> ResolutionPath {
+        stack::update();
         let mut path = Vec::new();
         let mut curr = NodeIndex::from(leaf_node);
         let width = self.size().into();
@@ -870,6 +900,7 @@ impl<C: Crypto> RatchetTree<C> {
     }
 
     fn resolve(&self, subtree_root: NodeIndex) -> Vec<NodeIndex, { consts::MAX_GROUP_SIZE / 2 }> {
+        stack::update();
         let mut res = Vec::new();
 
         if let Ok(n) = LeafIndex::try_from(subtree_root) {

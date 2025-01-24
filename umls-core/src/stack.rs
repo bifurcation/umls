@@ -1,36 +1,32 @@
-#[cfg(feature = "stack_measurement")]
+#[cfg(feature = "stack")]
 mod inner {
     pub use core::arch::asm;
     pub use core::sync::atomic::{AtomicUsize, Ordering};
 
     pub static STACK_END: AtomicUsize = AtomicUsize::new(usize::MAX);
 
-    #[macro_export]
-    macro_rules! stack_ptr {
-        () => ({
-            let x: usize;
-            unsafe {
-                asm!(
-                    "mov {0}, sp" ,
-                    out(reg) x,
-                    options(pure, nomem, nostack),
-                );
-            }
-            x
-        })
+    #[inline(always)]
+    fn stack_ptr() -> usize {
+        let x: usize;
+        unsafe {
+            asm!(
+                "mov {0}, sp" ,
+                out(reg) x,
+                options(pure, nomem, nostack),
+            );
+        }
+        x
     }
 
-    #[macro_export]
-    macro_rules! tick {
-        () => {{
-            let curr_rsp = stack_ptr!();
-            STACK_END.fetch_min(curr_rsp, Ordering::SeqCst);
-        }};
+    #[inline(always)]
+    pub fn update() {
+        let curr_rsp = stack_ptr();
+        STACK_END.fetch_min(curr_rsp, Ordering::SeqCst);
     }
 
-    pub fn stack_usage<T, F: FnOnce() -> T>(callback: F) -> (T, usize) {
+    pub fn usage<T, F: FnOnce() -> T>(callback: F) -> (T, usize) {
         STACK_END.store(usize::MAX, Ordering::SeqCst);
-        let stack_start = stack_ptr!();
+        let stack_start = stack_ptr();
 
         let t = callback();
 
@@ -43,30 +39,19 @@ mod inner {
     }
 }
 
-#[cfg(not(feature = "stack_measurement"))]
+#[cfg(not(feature = "stack"))]
 mod inner {
-    #[macro_export]
-    macro_rules! stack_ptr {
-        () => {
-            0
-        };
-    }
-
-    #[macro_export]
-    macro_rules! tick {
-        () => {};
-    }
+    pub fn update() {}
 }
 
 pub use inner::*;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "stack"))]
 mod test {
-    use super::*;
-    use crate::{stack_ptr, tick};
+    use crate::stack;
 
     fn fibonacci(n: u64) -> u64 {
-        tick!();
+        stack::update();
         match n {
             0 => 0,
             1 => 1,
@@ -75,7 +60,7 @@ mod test {
     }
 
     fn fibonacci_stack(n: u64) -> usize {
-        stack_usage(|| {
+        stack::usage(|| {
             let _ = fibonacci(n);
         })
         .1
@@ -86,6 +71,8 @@ mod test {
         let stack2 = fibonacci_stack(2);
         let stack3 = fibonacci_stack(3);
         let stack4 = fibonacci_stack(4);
+
+        println!("fn   {} {} {}", stack2, stack3, stack4);
 
         // Stack size should increase linearly
         assert!(stack3 > stack2);

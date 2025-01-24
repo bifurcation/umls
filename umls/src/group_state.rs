@@ -1,4 +1,4 @@
-use umls_core::{common::*, crypto::*, io::*, protocol::*, syntax::*, treekem::*};
+use umls_core::{common::*, crypto::*, io::*, protocol::*, stack, syntax::*, treekem::*};
 
 use crate::key_schedule::*;
 use crate::transcript_hash::InterimTranscriptHash;
@@ -19,6 +19,7 @@ pub struct GroupState<C: Crypto> {
 
 impl<C: Crypto> GroupState<C> {
     pub fn epoch_authenticator(&self) -> EpochAuthenticator<C> {
+        stack::update();
         self.epoch_secret.epoch_authenticator()
     }
 }
@@ -29,6 +30,7 @@ impl<C: Crypto> SenderKeySource<C> for GroupState<C> {
         sender: LeafIndex,
         generation: Generation,
     ) -> Option<(AeadKey<C>, AeadNonce<C>)> {
+        stack::update();
         let (gen, key, nonce) = self
             .epoch_secret
             .handshake_key(sender, self.ratchet_tree.size());

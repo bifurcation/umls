@@ -3,6 +3,9 @@ name = "umls-core"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+stack = []
+
 [dependencies]
 derive-serialize = { path = "../derive-serialize" }
 

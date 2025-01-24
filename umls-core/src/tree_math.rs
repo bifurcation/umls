@@ -1,11 +1,13 @@
 use crate::common::*;
 use crate::protocol::LeafIndex;
+use crate::stack;
 
 #[derive(Copy, Clone, Debug, PartialEq, PartialOrd, Eq, Hash)]
 pub struct NodeIndex(pub usize);
 
 impl From<LeafIndex> for NodeIndex {
     fn from(i: LeafIndex) -> Self {
+        stack::update();
         Self((2 * i.0) as usize)
     }
 }
@@ -14,6 +16,7 @@ impl TryFrom<NodeIndex> for LeafIndex {
     type Error = Error;
 
     fn try_from(i: NodeIndex) -> Result<Self> {
+        stack::update();
         if !i.is_leaf() {
             Err(Error("Node index is not a leaf"))
         } else {
@@ -24,14 +27,17 @@ impl TryFrom<NodeIndex> for LeafIndex {
 
 impl NodeIndex {
     pub fn level(&self) -> usize {
+        stack::update();
         self.0.trailing_ones() as usize
     }
 
     pub fn is_leaf(&self) -> bool {
+        stack::update();
         self.level() == 0
     }
 
     pub fn parent(&self, width: NodeCount) -> Option<Self> {
+        stack::update();
         if *self == width.root() {
             None
         } else {
@@ -42,22 +48,26 @@ impl NodeIndex {
     }
 
     pub fn left(&self) -> Option<Self> {
+        stack::update();
         let k = self.level();
         (k != 0).then_some(Self(self.0 ^ (0b01 << (k - 1))))
     }
 
     pub fn right(&self) -> Option<Self> {
+        stack::update();
         let k = self.level();
         (k != 0).then_some(Self(self.0 ^ (0b11 << (k - 1))))
     }
 
     // This function will return an out-of-bounds index if applied to the root.
     fn sibling_unchecked(&self) -> Self {
+        stack::update();
         let k = self.level();
         Self(self.0 ^ (0b10 << k))
     }
 
     pub fn dirpath_child(&self, leaf: LeafIndex) -> Option<Self> {
+        stack::update();
         let leaf = NodeIndex::from(leaf);
         let k = self.level();
 
@@ -72,10 +82,12 @@ impl NodeIndex {
     }
 
     pub fn copath_child(&self, leaf: LeafIndex) -> Option<Self> {
+        stack::update();
         self.dirpath_child(leaf).map(|n| n.sibling_unchecked())
     }
 
     pub fn is_above_or_eq(&self, leaf: LeafIndex) -> bool {
+        stack::update();
         let leaf = NodeIndex::from(leaf);
         let k = self.level();
         k >= leaf.level() && (self.0 >> (k + 1)) == (leaf.0 >> (k + 1))
@@ -87,6 +99,7 @@ pub struct LeafCount(pub usize);
 
 impl From<NodeCount> for LeafCount {
     fn from(n: NodeCount) -> Self {
+        stack::update();
         if n.0 == 0 {
             Self(0)
         } else {
@@ -97,6 +110,7 @@ impl From<NodeCount> for LeafCount {
 
 impl LeafCount {
     pub fn root(&self) -> NodeIndex {
+        stack::update();
         NodeCount::from(*self).root()
     }
 }
@@ -106,6 +120,7 @@ pub struct NodeCount(pub usize);
 
 impl From<LeafCount> for NodeCount {
     fn from(n: LeafCount) -> Self {
+        stack::update();
         if n.0 == 0 {
             Self(0)
         } else {
@@ -116,6 +131,7 @@ impl From<LeafCount> for NodeCount {
 
 impl NodeCount {
     pub fn root(&self) -> NodeIndex {
+        stack::update();
         NodeIndex(self.0 / 2)
     }
 }

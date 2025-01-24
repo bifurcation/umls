@@ -1,6 +1,7 @@
 use crate::common::*;
 use crate::crypto::*;
 use crate::io::*;
+use crate::stack;
 use crate::syntax::*;
 
 use heapless::Vec;
@@ -68,6 +69,7 @@ pub struct ProtocolVersion(u16);
 
 impl Default for ProtocolVersion {
     fn default() -> Self {
+        stack::update();
         consts::SUPPORTED_VERSION
     }
 }
@@ -99,6 +101,7 @@ pub struct Capabilities {
 
 impl Capabilities {
     pub fn new<C: Crypto>() -> Self {
+        stack::update();
         Self {
             versions: Vec::from_slice(&[consts::SUPPORTED_VERSION]).unwrap(),
             cipher_suites: Vec::from_slice(&[C::CIPHER_SUITE]).unwrap(),
@@ -116,6 +119,7 @@ pub struct Lifetime {
 
 impl Default for Lifetime {
     fn default() -> Self {
+        stack::update();
         Self {
             not_before: u64::MIN,
             not_after: u64::MAX,
@@ -466,6 +470,7 @@ impl<C: CryptoSizes> PrivateMessage<C> {
         sender_data_secret: &SenderDataSecret<C>,
         authenticated_data: PrivateMessageAad,
     ) -> Result<Self> {
+        stack::update();
         // Form payload
         let MessageContent::Commit(commit) = signed_framed_content.tbs.content.content;
         let signature = signed_framed_content.signature;
@@ -519,6 +524,7 @@ impl<C: CryptoSizes> PrivateMessage<C> {
         sender_key_source: &impl SenderKeySource<C>,
         group_context: &GroupContext<C>,
     ) -> Result<(SignedFramedContent<C>, ConfirmationTag<C>)> {
+        stack::update();
         // Check outer properties are correct
         if self.group_id != group_context.group_id {
             return Err(Error("Wrong group"));
