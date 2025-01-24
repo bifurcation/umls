@@ -602,6 +602,7 @@ mod test {
 
     use crate::crypto2::test::RustCryptoX25519;
 
+    /*
     fn print_size<T: Serialize>() {
         println!("{} => {}", core::any::type_name::<T>(), T::MAX_SIZE);
     }
@@ -614,4 +615,5 @@ mod test {
         print_size::<SenderData>();
         print_size::<PrivateMessageContent<RustCryptoX25519>>();
     }
+    */
 }
