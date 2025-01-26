@@ -3,7 +3,7 @@ fn main() {}
 
 #[cfg(all(feature = "stack", feature = "std_rng"))]
 fn main() {
-    use umls::{group_state::GroupState, MlsGroup, Operation};
+    use umls::*;
     use umls_core::protocol::consts;
     use umls_core::{crypto::*, protocol::*, stack, syntax::*};
     use umls_rust_crypto::RustCryptoX25519;
@@ -15,23 +15,22 @@ fn main() {
     let credential = Credential::Basic(BasicCredential(
         Opaque::try_from(b"alice".as_slice()).unwrap(),
     ));
-    let ((kp_priv, kp), make_key_package_0_stack) = stack::usage(|| {
-        umls::make_key_package::<RustCryptoX25519>(&mut rng, sig_priv, sig_key, credential).unwrap()
-    });
+    let ((kp_priv, kp), make_key_package_0_stack) =
+        stack::usage(|| umls::KeyPackage::new(&mut rng, sig_priv, sig_key, credential).unwrap());
 
     // Create the group
     let group_id = GroupId(Opaque::try_from(b"group_id".as_slice()).unwrap());
-    let (mut state_a, create_group_stack) =
-        stack::usage(|| GroupState::create(&mut rng, kp_priv, kp, group_id).unwrap());
+    let (mut state_a, create_group_stack) = stack::usage(|| {
+        GroupState::<RustCryptoX25519>::create(&mut rng, kp_priv, kp, group_id).unwrap()
+    });
 
     // Create the second user
     let (sig_priv, sig_key) = RustCryptoX25519::sig_generate(&mut rng).unwrap();
     let credential = Credential::Basic(BasicCredential(
         Opaque::try_from(b"bob".as_slice()).unwrap(),
     ));
-    let ((kp_priv, kp), make_key_package_1_stack) = stack::usage(|| {
-        umls::make_key_package::<RustCryptoX25519>(&mut rng, sig_priv, sig_key, credential).unwrap()
-    });
+    let ((kp_priv, kp), make_key_package_1_stack) =
+        stack::usage(|| umls::KeyPackage::new(&mut rng, sig_priv, sig_key, credential).unwrap());
 
     // Add the second user to the group
     let op = Operation::Add(kp.clone());
@@ -56,7 +55,7 @@ fn main() {
             Opaque::try_from(b"carol".as_slice()).unwrap(),
         ));
         let ((kp_priv, kp), make_key_package_2_stack) = stack::usage(|| {
-            umls::make_key_package(&mut rng, sig_priv, sig_key, credential).unwrap()
+            umls::KeyPackage::new(&mut rng, sig_priv, sig_key, credential).unwrap()
         });
 
         // Add the third user to the group
