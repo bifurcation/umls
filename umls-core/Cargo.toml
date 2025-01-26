@@ -7,7 +7,7 @@ edition = "2021"
 stack = []
 
 [dependencies]
-derive-serialize = { path = "../derive-serialize" }
+derive-serialize = { path = "../umls-macros" }
 
 aead = { version = "0.5.2", default-features = false }
 heapless = { version = "0.8.0", default-features = false }

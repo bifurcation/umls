@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "umls-core",
-    "derive-serialize",
+    "umls-macros",
     "umls-rust-crypto",
     "umls",
 ]
