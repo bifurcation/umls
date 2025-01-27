@@ -1,4 +1,4 @@
-use crate::common::*;
+use crate::common::{Error, Result};
 use crate::stack;
 
 use heapless::Vec;
@@ -24,27 +24,12 @@ pub trait Read: Sized {
     fn peek(&self) -> Result<u8>;
 }
 
-pub trait ReadRef<'a>: Sized {
-    /// Returns a reference to the first `n` bytes read.  Returns an error if less than `n` bytes
-    /// are available.
-    fn read_ref(&mut self, n: usize) -> Result<&'a [u8]>;
-
-    /// Are there more bytes to be read?
-    fn is_empty(&self) -> bool;
-
-    /// Create a new reader for the next `n` bytes, and advance this reader past those `n` bytes.
-    fn take(&mut self, n: usize) -> Result<Self>;
-
-    /// Returns a copy of the first byte available.  Returns n error if the reader is empty.
-    fn peek(&self) -> Result<u8>;
-}
-
 impl<const N: usize> Write for Vec<u8, N> {
     fn write(&mut self, data: &[u8]) -> Result<()> {
         stack::update();
         stack::update();
         self.extend_from_slice(data)
-            .map_err(|_| Error("Insufficient capacity"))
+            .map_err(|()| Error("Insufficient capacity"))
     }
 }
 
@@ -103,6 +88,7 @@ impl Default for CountWriter {
 }
 
 impl CountWriter {
+    #[must_use]
     pub fn len(&self) -> usize {
         stack::update();
         self.len
@@ -114,40 +100,6 @@ impl Write for CountWriter {
         stack::update();
         self.len += data.len();
         Ok(())
-    }
-}
-
-pub struct SliceReader<'a>(pub &'a [u8]);
-
-impl<'a> ReadRef<'a> for SliceReader<'a> {
-    fn read_ref(&mut self, n: usize) -> Result<&'a [u8]> {
-        stack::update();
-        if self.0.len() < n {
-            return Err(Error("Insufficient data"));
-        }
-
-        let (data, rest) = self.0.split_at(n);
-        self.0 = rest;
-        Ok(data)
-    }
-
-    fn is_empty(&self) -> bool {
-        stack::update();
-        self.0.is_empty()
-    }
-
-    fn take(&mut self, n: usize) -> Result<Self> {
-        stack::update();
-        Ok(Self(self.read_ref(n)?))
-    }
-
-    fn peek(&self) -> Result<u8> {
-        stack::update();
-        if self.is_empty() {
-            Err(Error("Insufficient data"))
-        } else {
-            Ok(self.0[0])
-        }
     }
 }
 

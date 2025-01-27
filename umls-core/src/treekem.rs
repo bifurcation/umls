@@ -1,10 +1,16 @@
-use crate::common::*;
-use crate::crypto::*;
-use crate::io::*;
-use crate::protocol::*;
+use crate::common::{Error, Result};
+use crate::crypto::{
+    Crypto, DependentSizes, Hash, HashOutput, HpkeEncrypt, HpkePrivateKey, HpkePublicKey,
+    Initializers, RawHashOutput, SignaturePrivateKey,
+};
+use crate::io::{CountWriter, Read, Write};
+use crate::protocol::{
+    GroupContext, LeafIndex, LeafNode, LeafNodeSource, PathSecret, RawPathSecret, TreeHash,
+    UpdatePath, UpdatePathNode,
+};
 use crate::stack;
-use crate::syntax::*;
-use crate::tree_math::*;
+use crate::syntax::{Deserialize, Materialize, Nil, Serialize, Varint};
+use crate::tree_math::{LeafCount, NodeCount, NodeIndex};
 
 use heapless::{FnvIndexMap, Vec};
 use itertools::Itertools;
@@ -242,13 +248,13 @@ impl<C: Crypto> RatchetTree<C> {
     const MAX_LENGTH_HEADER_SIZE: usize =
         Varint::size(Self::MAX_LEAF_NODES_SIZE + Self::MAX_PARENT_NODES_SIZE);
 
-    fn node_iter<'a>(&'a self) -> impl Iterator<Item = Option<Node<C>>> + use<'a, C> {
+    fn node_iter(&self) -> impl Iterator<Item = Option<Node<C>>> + use<'_, C> {
         stack::update();
         let n_trailing_blanks = self
             .leaf_nodes
             .iter()
             .rev()
-            .position(|n| n.is_some())
+            .position(core::option::Option::is_some)
             .unwrap();
         let n_nodes = 2 * (self.leaf_nodes.len() - n_trailing_blanks) - 1;
 
@@ -336,7 +342,7 @@ impl<C: Crypto> RatchetTree<C> {
         let blank = self
             .leaf_nodes
             .iter()
-            .position(|n| n.is_none())
+            .position(core::option::Option::is_none)
             .map(|i| LeafIndex(i as u32));
         let joiner_leaf = if let Some(index) = blank {
             index
@@ -442,16 +448,20 @@ impl<C: Crypto> RatchetTree<C> {
         let parent_width = leaf_width - 1;
         self.leaf_nodes
             .resize_default(leaf_width)
-            .map_err(|_| Error("Resize error"))?;
+            .map_err(|()| Error("Resize error"))?;
         self.parent_nodes
             .resize_default(parent_width)
-            .map_err(|_| Error("Resize error"))
+            .map_err(|()| Error("Resize error"))
     }
 
     fn truncate(&mut self) {
         let mut start = self.leaf_nodes.len() / 2;
         let mut end = self.leaf_nodes.len();
-        while start > 0 && self.leaf_nodes[start..end].iter().all(|n| n.is_none()) {
+        while start > 0
+            && self.leaf_nodes[start..end]
+                .iter()
+                .all(core::option::Option::is_none)
+        {
             end = start;
             start /= 2;
         }
@@ -578,7 +588,7 @@ impl<C: Crypto> RatchetTree<C> {
             let raw_hash_output = RawHashOutput::<C>::try_from(ps.0.as_ref())
                 .map_err(|_| Error("This shouldn't have failed"))?;
             let raw_path_secret = RawPathSecret(raw_hash_output);
-            for n in res.iter() {
+            for n in res {
                 let encryption_key = self.encryption_key_at(*n).unwrap();
                 let encrypted_path_secret =
                     raw_path_secret.hpke_seal(rng, encryption_key, &group_context)?;
@@ -904,33 +914,28 @@ impl<C: Crypto> RatchetTree<C> {
         let mut res = Vec::new();
 
         if let Ok(n) = LeafIndex::try_from(subtree_root) {
-            match self.leaf_node_at(n) {
-                // The resolution of a non-blank leaf node comprises the node itself
-                Some(_) => res.push(subtree_root).unwrap(),
-
+            if self.leaf_node_at(n).is_some() {
+                // The resolution of a non-blank leaf node comprises the node itself.
+                res.push(subtree_root).unwrap()
+            } else {
                 // The resolution of a blank leaf node is the empty list.
-                None => {}
             }
         } else {
             let n = ParentIndex::try_from(subtree_root).unwrap();
-            match self.parent_node_at(n) {
+            if let Some(node) = self.parent_node_at(n) {
                 // The resolution of a non-blank parent node comprises the node itself, followed by
-                // its unmerged leaves
-                Some(node) => {
-                    res.push(subtree_root).unwrap();
-                    res.extend(node.unmerged_leaves.iter().map(|&i| i.into()));
-                }
-
+                // its unmerged leaves.
+                res.push(subtree_root).unwrap();
+                res.extend(node.unmerged_leaves.iter().map(|&i| i.into()));
+            } else {
                 // The resolution of a blank intermediate node is the result of concatenating the
                 // resolution of its left child with the resolution of its right child, in that
-                // order.todo!()
-                None => {
-                    let left = subtree_root.left().unwrap();
-                    res.extend_from_slice(&self.resolve(left)).unwrap();
+                // order.
+                let left = subtree_root.left().unwrap();
+                res.extend_from_slice(&self.resolve(left)).unwrap();
 
-                    let right = subtree_root.right().unwrap();
-                    res.extend_from_slice(&self.resolve(right)).unwrap();
-                }
+                let right = subtree_root.right().unwrap();
+                res.extend_from_slice(&self.resolve(right)).unwrap();
             }
         }
 

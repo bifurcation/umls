@@ -1,5 +1,5 @@
-use crate::common::*;
-use crate::io::*;
+use crate::common::{Error, Result};
+use crate::io::{CountWriter, Read, Write};
 use crate::stack;
 
 use heapless::Vec;
@@ -134,6 +134,7 @@ impl<const N: usize> Deserialize for [u8; N] {
 pub struct Varint(pub usize);
 
 impl Varint {
+    #[must_use]
     pub const fn size(x: usize) -> usize {
         match x.checked_ilog2() {
             None | Some(0..6) => 1,
@@ -186,12 +187,12 @@ impl<T: Serialize, const N: usize> Serialize for Vec<T, N> {
     fn serialize(&self, writer: &mut impl Write) -> Result<()> {
         stack::update();
         let mut count = CountWriter::default();
-        for val in self.iter() {
+        for val in self {
             val.serialize(&mut count)?;
         }
 
         Varint(count.len()).serialize(writer)?;
-        for val in self.iter() {
+        for val in self {
             val.serialize(writer)?;
         }
 
@@ -231,7 +232,7 @@ impl<const N: usize> TryFrom<&[u8]> for Raw<N> {
 
     fn try_from(val: &[u8]) -> Result<Self> {
         stack::update();
-        let vec = Vec::try_from(val).map_err(|_| Error("Size error"))?;
+        let vec = Vec::try_from(val).map_err(|()| Error("Size error"))?;
         Ok(Self(vec))
     }
 }
@@ -248,7 +249,7 @@ impl<const N: usize> Serialize for Raw<N> {
 impl<const N: usize> Deserialize for Raw<N> {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
         stack::update();
-        let vec = Vec::from_slice(reader.read(N)?).map_err(|_| Error("Too many elements"))?;
+        let vec = Vec::from_slice(reader.read(N)?).map_err(|()| Error("Too many elements"))?;
         Ok(Self(vec))
     }
 }
@@ -276,7 +277,7 @@ impl<const N: usize> TryFrom<&[u8]> for Opaque<N> {
 
     fn try_from(val: &[u8]) -> Result<Self> {
         stack::update();
-        let vec = Vec::try_from(val).map_err(|_| Error("Size error"))?;
+        let vec = Vec::try_from(val).map_err(|()| Error("Size error"))?;
         Ok(Self(vec))
     }
 }
@@ -296,7 +297,7 @@ impl<const N: usize> Deserialize for Opaque<N> {
         stack::update();
         let len = Varint::deserialize(reader)?;
 
-        let vec = Vec::from_slice(reader.read(len.0)?).map_err(|_| Error("Too many elements"))?;
+        let vec = Vec::from_slice(reader.read(len.0)?).map_err(|()| Error("Too many elements"))?;
 
         Ok(Self(vec))
     }

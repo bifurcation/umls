@@ -1,8 +1,8 @@
-use crate::common::*;
-use crate::io::*;
+use crate::common::{Error, Result};
+use crate::io::{CountWriter, Read, Write};
 use crate::protocol::CipherSuite;
 use crate::stack;
-use crate::syntax::*;
+use crate::syntax::{Deserialize, Opaque, Serialize, Varint};
 
 use aead::Buffer;
 use core::fmt::Debug;
@@ -122,6 +122,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         aad: &[u8],
     ) -> Result<()>;
 
+    #[must_use]
     fn hmac(key: &[u8], data: &[u8]) -> Self::HashOutput {
         stack::update();
         let mut hmac = Self::Hmac::new(key);

@@ -1,8 +1,14 @@
-use crate::common::*;
-use crate::crypto::*;
-use crate::io::*;
+use crate::common::{Error, Result};
+use crate::crypto::{
+    AeadEncrypt, AeadKey, AeadNonce, Crypto, CryptoSizes, EncryptedGroupInfo,
+    EncryptedGroupSecrets, EncryptedPathSecret, EncryptedPrivateMessageContent,
+    EncryptedSenderData, HashOutput, HpkeCiphertext, HpkePrivateKey, HpkePublicKey, RawHashOutput,
+    SerializedRatchetTree, Signature, SignatureLabel, SignaturePrivateKey, SignaturePublicKey,
+    Signed,
+};
+use crate::io::{Read, Write};
 use crate::stack;
-use crate::syntax::*;
+use crate::syntax::{Deserialize, Materialize, Nil, Opaque, Serialize};
 
 use heapless::Vec;
 
@@ -100,6 +106,7 @@ pub struct Capabilities {
 }
 
 impl Capabilities {
+    #[must_use]
     pub fn new<C: Crypto>() -> Self {
         stack::update();
         Self {

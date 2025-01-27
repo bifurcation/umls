@@ -1,4 +1,4 @@
-use crate::common::*;
+use crate::common::{Error, Result};
 use crate::protocol::LeafIndex;
 use crate::stack;
 
@@ -26,16 +26,19 @@ impl TryFrom<NodeIndex> for LeafIndex {
 }
 
 impl NodeIndex {
+    #[must_use]
     pub fn level(&self) -> usize {
         stack::update();
         self.0.trailing_ones() as usize
     }
 
+    #[must_use]
     pub fn is_leaf(&self) -> bool {
         stack::update();
         self.level() == 0
     }
 
+    #[must_use]
     pub fn parent(&self, width: NodeCount) -> Option<Self> {
         stack::update();
         if *self == width.root() {
@@ -47,12 +50,14 @@ impl NodeIndex {
         }
     }
 
+    #[must_use]
     pub fn left(&self) -> Option<Self> {
         stack::update();
         let k = self.level();
         (k != 0).then_some(Self(self.0 ^ (0b01 << (k - 1))))
     }
 
+    #[must_use]
     pub fn right(&self) -> Option<Self> {
         stack::update();
         let k = self.level();
@@ -66,6 +71,7 @@ impl NodeIndex {
         Self(self.0 ^ (0b10 << k))
     }
 
+    #[must_use]
     pub fn dirpath_child(&self, leaf: LeafIndex) -> Option<Self> {
         stack::update();
         let leaf = NodeIndex::from(leaf);
@@ -81,11 +87,13 @@ impl NodeIndex {
         Some(Self((self.0 & !mask) ^ clear ^ (leaf.0 & mask)))
     }
 
+    #[must_use]
     pub fn copath_child(&self, leaf: LeafIndex) -> Option<Self> {
         stack::update();
         self.dirpath_child(leaf).map(|n| n.sibling_unchecked())
     }
 
+    #[must_use]
     pub fn is_above_or_eq(&self, leaf: LeafIndex) -> bool {
         stack::update();
         let leaf = NodeIndex::from(leaf);
@@ -109,6 +117,7 @@ impl From<NodeCount> for LeafCount {
 }
 
 impl LeafCount {
+    #[must_use]
     pub fn root(&self) -> NodeIndex {
         stack::update();
         NodeCount::from(*self).root()
@@ -130,6 +139,7 @@ impl From<LeafCount> for NodeCount {
 }
 
 impl NodeCount {
+    #[must_use]
     pub fn root(&self) -> NodeIndex {
         stack::update();
         NodeIndex(self.0 / 2)
