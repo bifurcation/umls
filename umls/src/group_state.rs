@@ -369,8 +369,8 @@ impl<C: CryptoSizes> GroupState<C> {
         let private_message = PrivateMessage::new(
             signed_framed_content,
             confirmation_tag.clone(),
-            sender_data,
-            key,
+            &sender_data,
+            &key,
             nonce,
             &epoch_secret_prev.sender_data_secret(),
             Default::default(),
