@@ -16,7 +16,7 @@ fn main() {
         Opaque::try_from(b"alice".as_slice()).unwrap(),
     ));
     let ((kp_priv, kp), make_key_package_0_stack) =
-        stack::usage(|| umls::KeyPackage::new(&mut rng, sig_priv, sig_key, credential).unwrap());
+        stack::usage(|| umls::KeyPackage::create(&mut rng, sig_priv, sig_key, credential).unwrap());
 
     // Create the group
     let group_id = GroupId(Opaque::try_from(b"group_id".as_slice()).unwrap());
@@ -30,7 +30,7 @@ fn main() {
         Opaque::try_from(b"bob".as_slice()).unwrap(),
     ));
     let ((kp_priv, kp), make_key_package_1_stack) =
-        stack::usage(|| umls::KeyPackage::new(&mut rng, sig_priv, sig_key, credential).unwrap());
+        stack::usage(|| umls::KeyPackage::create(&mut rng, sig_priv, sig_key, credential).unwrap());
 
     // Add the second user to the group
     let op = Operation::Add(kp.clone());
@@ -39,7 +39,7 @@ fn main() {
 
     // Second user joins the group
     let (mut state_b, join_group_1_stack) =
-        stack::usage(|| GroupState::join(kp_priv, kp, welcome_1.unwrap()).unwrap());
+        stack::usage(|| GroupState::join(kp_priv, &kp, welcome_1.unwrap()).unwrap());
 
     println!("make_key_package_0: {:8}", make_key_package_0_stack);
     println!("create_group:       {:8}", create_group_stack);
@@ -55,7 +55,7 @@ fn main() {
             Opaque::try_from(b"carol".as_slice()).unwrap(),
         ));
         let ((kp_priv, kp), make_key_package_2_stack) = stack::usage(|| {
-            umls::KeyPackage::new(&mut rng, sig_priv, sig_key, credential).unwrap()
+            umls::KeyPackage::create(&mut rng, sig_priv, sig_key, credential).unwrap()
         });
 
         // Add the third user to the group
@@ -65,7 +65,7 @@ fn main() {
 
         // Second user joins the group
         let (_state_c, join_group_2_stack) =
-            stack::usage(|| GroupState::join(kp_priv, kp, welcome_2.unwrap()).unwrap());
+            stack::usage(|| GroupState::join(kp_priv, &kp, welcome_2.unwrap()).unwrap());
 
         // Other member handles the commit
         let ((), handle_commit_2_stack) = stack::usage(|| state_a.handle_commit(commit_2).unwrap());

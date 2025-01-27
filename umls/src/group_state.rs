@@ -1,8 +1,19 @@
 use umls_core::{
     common::{Error, Result},
-    crypto::{AeadEncrypt, AeadKey, AeadNonce, Crypto, CryptoSizes, Hmac, HpkeEncrypt, SerializedRatchetTree, SignaturePrivateKey, SignaturePublicKey},
+    crypto::{
+        AeadEncrypt, AeadKey, AeadNonce, Crypto, CryptoSizes, HpkeEncrypt, SerializedRatchetTree,
+        SignaturePrivateKey, SignaturePublicKey,
+    },
     io::{Read, Write},
-    protocol::{self, Add, Capabilities, Commit, Credential, EncryptedGroupSecretsEntry, Epoch, FramedContent, FramedContentBinder, FramedContentTbs, Generation, GroupContext, GroupId, GroupInfo, GroupInfoExtension, GroupInfoTbs, GroupSecrets, HashRef, KeyPackage, KeyPackagePriv, KeyPackageTbs, LeafIndex, LeafNode, LeafNodeSource, LeafNodeTbs, Lifetime, MessageContent, PrivateMessage, PrivateMessageAad, Proposal, ProposalOrRef, ProtocolVersion, Remove, ReuseGuard, Sender, SenderData, SenderKeySource, SignedFramedContent, Welcome},
+    protocol::{
+        self, Add, Capabilities, Commit, ConfirmedTranscriptHash, Credential,
+        EncryptedGroupSecretsEntry, Epoch, FramedContent, FramedContentBinder, FramedContentTbs,
+        Generation, GroupContext, GroupId, GroupInfo, GroupInfoExtension, GroupInfoTbs,
+        GroupSecrets, HashRef, KeyPackage, KeyPackagePriv, KeyPackageTbs, LeafIndex, LeafNode,
+        LeafNodeSource, LeafNodeTbs, Lifetime, MessageContent, PrivateMessage, PrivateMessageAad,
+        Proposal, ProposalOrRef, ProtocolVersion, Remove, ReuseGuard, Sender, SenderData,
+        SenderKeySource, SignedFramedContent, Welcome,
+    },
     stack,
     syntax::{Deserialize, Materialize, Serialize},
     treekem::{RatchetTree, RatchetTreePriv},
@@ -16,7 +27,7 @@ use rand::Rng;
 use rand_core::CryptoRngCore;
 
 pub trait MakeKeyPackage<C: Crypto> {
-    fn new(
+    fn create(
         rng: &mut (impl Rng + CryptoRngCore),
         signature_priv: SignaturePrivateKey<C>,
         signature_key: SignaturePublicKey<C>,
@@ -25,7 +36,7 @@ pub trait MakeKeyPackage<C: Crypto> {
 }
 
 impl<C: Crypto> MakeKeyPackage<C> for KeyPackage<C> {
-    fn new(
+    fn create(
         rng: &mut (impl Rng + CryptoRngCore),
         signature_priv: SignaturePrivateKey<C>,
         signature_key: SignaturePublicKey<C>,
@@ -42,7 +53,7 @@ impl<C: Crypto> MakeKeyPackage<C> for KeyPackage<C> {
             credential,
             capabilities: Capabilities::new::<C>(),
             leaf_node_source: LeafNodeSource::KeyPackage(Lifetime::default()),
-            extensions: Default::default(),
+            extensions: Vec::default(),
         };
 
         let leaf_node = LeafNode::sign(leaf_node_tbs, &signature_priv)?;
@@ -53,7 +64,7 @@ impl<C: Crypto> MakeKeyPackage<C> for KeyPackage<C> {
             cipher_suite: C::CIPHER_SUITE,
             init_key,
             leaf_node,
-            extensions: Default::default(),
+            extensions: Vec::default(),
         };
 
         let key_package = KeyPackage::sign(key_package_tbs, &signature_priv)?;
@@ -115,8 +126,8 @@ impl<C: CryptoSizes> GroupState<C> {
             group_id,
             epoch: Epoch(0),
             tree_hash: ratchet_tree.root_hash()?,
-            confirmed_transcript_hash: Default::default(),
-            extensions: Default::default(),
+            confirmed_transcript_hash: ConfirmedTranscriptHash::default(),
+            extensions: Vec::default(),
         };
 
         // Compute the interim transcript hash
@@ -143,7 +154,7 @@ impl<C: CryptoSizes> GroupState<C> {
 
     pub fn join(
         key_package_priv: KeyPackagePriv<C>,
-        key_package: KeyPackage<C>,
+        key_package: &KeyPackage<C>,
         welcome: Welcome<C>,
     ) -> Result<Self> {
         stack::update();
@@ -246,6 +257,8 @@ impl<C: CryptoSizes> GroupState<C> {
         })
     }
 
+    // TODO(RLB) Break this function up, find commonalities with handle_commit
+    #[allow(clippy::too_many_lines)]
     pub fn send_commit(
         &mut self,
         rng: &mut (impl Rng + CryptoRngCore),
@@ -311,7 +324,7 @@ impl<C: CryptoSizes> GroupState<C> {
         // Form the Commit and the enclosing SignedFramedContent
         let mut commit = Commit {
             path: Some(update_path),
-            proposals: Default::default(),
+            proposals: Vec::default(),
         };
         commit
             .proposals
@@ -373,7 +386,7 @@ impl<C: CryptoSizes> GroupState<C> {
             &key,
             nonce,
             &epoch_secret_prev.sender_data_secret(),
-            Default::default(),
+            PrivateMessageAad::default(),
         )?;
 
         // Form the Welcome if required
@@ -388,7 +401,7 @@ impl<C: CryptoSizes> GroupState<C> {
             let group_secrets = GroupSecrets {
                 joiner_secret,
                 path_secret: Some(path_secret),
-                psks: Default::default(),
+                psks: Vec::default(),
             };
 
             let encrypted_group_secrets =

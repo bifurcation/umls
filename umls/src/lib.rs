@@ -1,6 +1,8 @@
 #![no_std]
 #![deny(warnings)] // We should be warnings-clear
 #![warn(clippy::pedantic)] // Be pedantic by default
+#![allow(clippy::missing_errors_doc)] // TODO
+#![allow(clippy::missing_panics_doc)] // TODO
 
 mod group_state;
 mod key_schedule;
@@ -33,10 +35,8 @@ mod test {
         KeyPackage<RustCryptoX25519>,
     ) {
         let (sig_priv, sig_key) = RustCryptoX25519::sig_generate(rng).unwrap();
-        let credential = Credential::Basic(BasicCredential(
-            Opaque::try_from(b"alice".as_slice()).unwrap(),
-        ));
-        KeyPackage::new(rng, sig_priv, sig_key, credential).unwrap()
+        let credential = Credential::Basic(BasicCredential(Opaque::try_from(name).unwrap()));
+        KeyPackage::create(rng, sig_priv, sig_key, credential).unwrap()
     }
 
     struct TestGroup {
@@ -71,7 +71,7 @@ mod test {
 
             let mut committer_state = self.states[committer].take().unwrap();
             let (commit, welcome) = committer_state.send_commit(&mut rng, op).unwrap();
-            let joiner_state = GroupState::join(kp_priv, kp, welcome.unwrap()).unwrap();
+            let joiner_state = GroupState::join(kp_priv, &kp, welcome.unwrap()).unwrap();
 
             // Everyone in the group handles the commit (note that committer is currently None)
             for state in self.states.iter_mut().filter_map(|s| s.as_mut()) {
@@ -101,7 +101,7 @@ mod test {
             let op = Operation::Remove(LeafIndex(removed as u32));
 
             let mut committer_state = self.states[committer].take().unwrap();
-            let (commit, welcome) = committer_state.send_commit(&mut rng, op).unwrap();
+            let (commit, _welcome) = committer_state.send_commit(&mut rng, op).unwrap();
 
             // Remove the removed member
             self.states[removed] = None;
@@ -125,8 +125,7 @@ mod test {
                 .states
                 .iter()
                 .enumerate()
-                .filter(|(i, s)| s.is_some())
-                .map(|(i, s)| i)
+                .filter_map(|(i, s)| s.as_ref().map(|_| i))
                 .collect();
 
             if members.contains(&roll) && members.len() != 1 {
@@ -138,7 +137,7 @@ mod test {
                 self.remove(*committer, roll);
             } else {
                 let committer = members.choose(&mut rng).unwrap();
-                let joiner = self.add(*committer, b"anonymous");
+                self.add(*committer, b"anonymous");
             }
         }
 

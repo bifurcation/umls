@@ -1,6 +1,6 @@
 use umls_core::{
     common::Result,
-    crypto::{Crypto, CryptoSizes, Hash, HashOutput, Hmac, Signature},
+    crypto::{Crypto, CryptoSizes, Hash, HashOutput, Signature},
     io::{Read, Write},
     protocol::{self, ConfirmationTag, ConfirmedTranscriptHash, FramedContent},
     stack,
