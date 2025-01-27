@@ -1,6 +1,4 @@
 #![no_std]
-#![allow(dead_code)]
-#![allow(unused_variables)]
 #![deny(warnings)] // We should be warnings-clear
 #![warn(clippy::pedantic)] // Be pedantic by default
 

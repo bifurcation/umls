@@ -513,7 +513,7 @@ impl<C: CryptoSizes> GroupState<C> {
 
         // Ratchet forward the key schedule
         let commit_secret = self.my_ratchet_tree_priv.commit_secret();
-        let (joiner_secret, welcome_key, welcome_nonce) = self
+        let _ = self
             .epoch_secret
             .advance(&commit_secret, &self.group_context)?;
 

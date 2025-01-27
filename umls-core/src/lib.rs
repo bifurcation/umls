@@ -1,4 +1,6 @@
-//#![no_std]
+#![no_std]
+#![deny(warnings)] // We should be warnings-clear
+#![warn(clippy::pedantic)] // Be pedantic by default
 
 pub mod common;
 pub mod crypto;
