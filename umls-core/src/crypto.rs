@@ -107,8 +107,8 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         signature_key: &Self::SignaturePublicKey,
     ) -> Result<()>;
 
-    type AeadKey: for<'a> TryFrom<&'a [u8], Error = Error> + AsMut<[u8]>;
-    type AeadNonce: for<'a> TryFrom<&'a [u8], Error = Error>;
+    type AeadKey: for<'a> TryFrom<&'a [u8], Error = Error>;
+    type AeadNonce: for<'a> TryFrom<&'a [u8], Error = Error> + AsMut<[u8]>;
     fn seal(
         buf: &mut impl Buffer,
         key: &Self::AeadKey,

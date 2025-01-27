@@ -107,7 +107,7 @@ impl<C: Crypto> RatchetTreePriv<C> {
         let mut curr = NodeIndex::from(my_index).parent(width);
         while let Some(parent) = curr {
             let parent_index = ParentIndex::try_from(parent).unwrap();
-            let parent_node = ratchet_tree.parent_node_at(parent_index).as_ref();
+            let parent_node = ratchet_tree.parent_node_at(parent_index);
             let path_secret = self.path_secrets[i].as_ref();
 
             match (path_secret, parent_node) {
@@ -156,6 +156,7 @@ enum Node<C: Crypto> {
     Parent(ParentNode<C>),
 }
 
+#[derive(Copy, Clone)]
 struct ParentIndex(usize);
 
 impl TryFrom<NodeIndex> for ParentIndex {
@@ -271,14 +272,14 @@ impl<C: Crypto> RatchetTree<C> {
         leaf_nodes.interleave(parent_nodes).take(n_nodes)
     }
 
-    pub fn leaf_node_at(&self, i: LeafIndex) -> &Option<LeafNode<C>> {
+    pub fn leaf_node_at(&self, i: LeafIndex) -> Option<&LeafNode<C>> {
         stack::update();
-        &self.leaf_nodes[i.0 as usize]
+        self.leaf_nodes[i.0 as usize].as_ref()
     }
 
-    fn parent_node_at(&self, i: ParentIndex) -> &Option<ParentNode<C>> {
+    fn parent_node_at(&self, i: ParentIndex) -> Option<&ParentNode<C>> {
         stack::update();
-        &self.parent_nodes[i.0]
+        self.parent_nodes[i.0].as_ref()
     }
 
     fn leaf_node_at_mut(&mut self, i: LeafIndex) -> &mut Option<LeafNode<C>> {
@@ -520,7 +521,7 @@ impl<C: Crypto> RatchetTree<C> {
                 let (_, encryption_key) = C::hpke_derive(&node_secret)?;
                 Ok(UpdatePathNode {
                     encryption_key,
-                    encrypted_path_secret: Default::default(),
+                    encrypted_path_secret: Vec::default(),
                 })
             })
             .collect();
@@ -760,7 +761,7 @@ impl<C: Crypto> RatchetTree<C> {
             *self.parent_node_at_mut(ParentIndex::try_from(*n).unwrap()) = Some(ParentNode {
                 public_key: public_key.clone(),
                 parent_hash,
-                unmerged_leaves: Default::default(),
+                unmerged_leaves: Vec::default(),
             });
         }
 
@@ -809,14 +810,11 @@ impl<C: Crypto> RatchetTree<C> {
             let right_hash =
                 self.original_tree_hash(cache, index.right().unwrap(), &local_except)?;
 
-            let parent_node = self
-                .parent_node_at(index.try_into()?)
-                .as_ref()
-                .map(|parent| {
-                    let mut parent = parent.clone();
-                    parent.unmerged_leaves.retain(|i| !local_except.contains(i));
-                    parent
-                });
+            let parent_node = self.parent_node_at(index.try_into()?).map(|parent| {
+                let mut parent = parent.clone();
+                parent.unmerged_leaves.retain(|i| !local_except.contains(i));
+                parent
+            });
 
             let mut h = C::Hash::default();
             parent_node.serialize(&mut h)?;
@@ -852,12 +850,12 @@ impl<C: Crypto> RatchetTree<C> {
         Ok(h.finalize())
     }
 
-    fn has_parent_hash(&self, node: NodeIndex, target_hash: HashOutput<C>) -> bool {
+    fn has_parent_hash(&self, node: NodeIndex, target_hash: &HashOutput<C>) -> bool {
         stack::update();
         self.resolve(node)
             .iter()
             .filter_map(|&n| self.parent_hash_at(n))
-            .any(|parent_hash| parent_hash == target_hash)
+            .any(|parent_hash| parent_hash == *target_hash)
     }
 
     pub fn parent_hash_valid(&self) -> Result<bool> {
@@ -885,7 +883,7 @@ impl<C: Crypto> RatchetTree<C> {
                 let lh = self.original_parent_hash(&mut cache, p, r)?;
                 let rh = self.original_parent_hash(&mut cache, p, l)?;
 
-                if !self.has_parent_hash(l, lh) && !self.has_parent_hash(r, rh) {
+                if !self.has_parent_hash(l, &lh) && !self.has_parent_hash(r, &rh) {
                     return Ok(false);
                 }
             }
@@ -916,7 +914,7 @@ impl<C: Crypto> RatchetTree<C> {
         if let Ok(n) = LeafIndex::try_from(subtree_root) {
             if self.leaf_node_at(n).is_some() {
                 // The resolution of a non-blank leaf node comprises the node itself.
-                res.push(subtree_root).unwrap()
+                res.push(subtree_root).unwrap();
             } else {
                 // The resolution of a blank leaf node is the empty list.
             }

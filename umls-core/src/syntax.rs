@@ -62,8 +62,9 @@ macro_rules! impl_primitive_serde {
 
         impl Deserialize for $t {
             fn deserialize(reader: &mut impl Read) -> Result<Self> {
-                stack::update();
                 const N: usize = core::mem::size_of::<$t>();
+
+                stack::update();
                 let mut bytes = [0; N];
                 bytes.copy_from_slice(reader.read(N)?);
                 Ok(Self::from_be_bytes(bytes))
@@ -153,7 +154,7 @@ impl Serialize for Varint {
         match Self::size(self.0) {
             1 => (self.0 as u8).serialize(writer),
             2 => (0x4000 | self.0 as u16).serialize(writer),
-            4 => (0x80000000 | self.0 as u32).serialize(writer),
+            4 => (0x8000_0000 | self.0 as u32).serialize(writer),
             _ => Err(Error("Invalid value")),
         }
     }
@@ -171,7 +172,7 @@ impl Deserialize for Varint {
             4 => {
                 let val = u32::deserialize(reader)?;
                 let val = usize::try_from(val).map_err(|_| Error("usize too small"))?;
-                val & 0x3fffffff
+                val & 0x3fff_ffff
             }
             _ => return Err(Error("Invalid encoding")),
         };

@@ -471,9 +471,9 @@ impl<C: CryptoSizes> PrivateMessage<C> {
     pub fn new(
         signed_framed_content: SignedFramedContent<C>,
         confirmation_tag: ConfirmationTag<C>,
-        sender_data: SenderData,
-        mut key: AeadKey<C>,
-        nonce: AeadNonce<C>,
+        sender_data: &SenderData,
+        key: &AeadKey<C>,
+        mut nonce: AeadNonce<C>,
         sender_data_secret: &SenderDataSecret<C>,
         authenticated_data: PrivateMessageAad,
     ) -> Result<Self> {
@@ -488,7 +488,8 @@ impl<C: CryptoSizes> PrivateMessage<C> {
         };
 
         // Encrypt payload
-        key.as_mut()
+        nonce
+            .as_mut()
             .iter_mut()
             .zip(sender_data.reuse_guard.0.iter())
             .for_each(|(k, r)| *k ^= r);
@@ -502,7 +503,7 @@ impl<C: CryptoSizes> PrivateMessage<C> {
         }
         .materialize()?;
 
-        let ciphertext = plaintext.seal(&key, &nonce, &aad)?;
+        let ciphertext = plaintext.seal(key, &nonce, &aad)?;
 
         // Encrypt sender data
         let (key, nonce) = C::sender_data_key_nonce(&sender_data_secret.0, ciphertext.as_ref());
@@ -513,7 +514,7 @@ impl<C: CryptoSizes> PrivateMessage<C> {
         }
         .materialize()?;
 
-        let encrypted_sender_data = AeadEncrypt::<C, _>::seal(&sender_data, &key, &nonce, &aad)?;
+        let encrypted_sender_data = AeadEncrypt::<C, _>::seal(sender_data, &key, &nonce, &aad)?;
 
         Ok(Self {
             group_id,
@@ -560,10 +561,11 @@ impl<C: CryptoSizes> PrivateMessage<C> {
         } = sender_data;
 
         // Look up keys for the sender and generation
-        let (mut key, nonce) = sender_key_source
+        let (key, mut nonce) = sender_key_source
             .find_keys(leaf_index, generation)
             .ok_or(Error("Unknown sender"))?;
-        key.as_mut()
+        nonce
+            .as_mut()
             .iter_mut()
             .zip(reuse_guard.0.iter())
             .for_each(|(k, r)| *k ^= r);

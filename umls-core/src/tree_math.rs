@@ -17,31 +17,31 @@ impl TryFrom<NodeIndex> for LeafIndex {
 
     fn try_from(i: NodeIndex) -> Result<Self> {
         stack::update();
-        if !i.is_leaf() {
-            Err(Error("Node index is not a leaf"))
-        } else {
+        if i.is_leaf() {
             Ok(Self((i.0 as u32) / 2))
+        } else {
+            Err(Error("Node index is not a leaf"))
         }
     }
 }
 
 impl NodeIndex {
     #[must_use]
-    pub fn level(&self) -> usize {
+    pub fn level(self) -> usize {
         stack::update();
         self.0.trailing_ones() as usize
     }
 
     #[must_use]
-    pub fn is_leaf(&self) -> bool {
+    pub fn is_leaf(self) -> bool {
         stack::update();
         self.level() == 0
     }
 
     #[must_use]
-    pub fn parent(&self, width: NodeCount) -> Option<Self> {
+    pub fn parent(self, width: NodeCount) -> Option<Self> {
         stack::update();
-        if *self == width.root() {
+        if self == width.root() {
             None
         } else {
             let k = self.level();
@@ -51,28 +51,28 @@ impl NodeIndex {
     }
 
     #[must_use]
-    pub fn left(&self) -> Option<Self> {
+    pub fn left(self) -> Option<Self> {
         stack::update();
         let k = self.level();
         (k != 0).then_some(Self(self.0 ^ (0b01 << (k - 1))))
     }
 
     #[must_use]
-    pub fn right(&self) -> Option<Self> {
+    pub fn right(self) -> Option<Self> {
         stack::update();
         let k = self.level();
         (k != 0).then_some(Self(self.0 ^ (0b11 << (k - 1))))
     }
 
     // This function will return an out-of-bounds index if applied to the root.
-    fn sibling_unchecked(&self) -> Self {
+    fn sibling_unchecked(self) -> Self {
         stack::update();
         let k = self.level();
         Self(self.0 ^ (0b10 << k))
     }
 
     #[must_use]
-    pub fn dirpath_child(&self, leaf: LeafIndex) -> Option<Self> {
+    pub fn dirpath_child(self, leaf: LeafIndex) -> Option<Self> {
         stack::update();
         let leaf = NodeIndex::from(leaf);
         let k = self.level();
@@ -88,13 +88,13 @@ impl NodeIndex {
     }
 
     #[must_use]
-    pub fn copath_child(&self, leaf: LeafIndex) -> Option<Self> {
+    pub fn copath_child(self, leaf: LeafIndex) -> Option<Self> {
         stack::update();
-        self.dirpath_child(leaf).map(|n| n.sibling_unchecked())
+        self.dirpath_child(leaf).map(NodeIndex::sibling_unchecked)
     }
 
     #[must_use]
-    pub fn is_above_or_eq(&self, leaf: LeafIndex) -> bool {
+    pub fn is_above_or_eq(self, leaf: LeafIndex) -> bool {
         stack::update();
         let leaf = NodeIndex::from(leaf);
         let k = self.level();
