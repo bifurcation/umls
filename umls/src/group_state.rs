@@ -1,14 +1,14 @@
 use umls_core::{
-    common::*,
-    crypto::*,
-    io::*,
-    protocol::{self, *},
+    common::{Error, Result},
+    crypto::{AeadEncrypt, AeadKey, AeadNonce, Crypto, CryptoSizes, Hmac, HpkeEncrypt, SerializedRatchetTree, SignaturePrivateKey, SignaturePublicKey},
+    io::{Read, Write},
+    protocol::{self, Add, Capabilities, Commit, Credential, EncryptedGroupSecretsEntry, Epoch, FramedContent, FramedContentBinder, FramedContentTbs, Generation, GroupContext, GroupId, GroupInfo, GroupInfoExtension, GroupInfoTbs, GroupSecrets, HashRef, KeyPackage, KeyPackagePriv, KeyPackageTbs, LeafIndex, LeafNode, LeafNodeSource, LeafNodeTbs, Lifetime, MessageContent, PrivateMessage, PrivateMessageAad, Proposal, ProposalOrRef, ProtocolVersion, Remove, ReuseGuard, Sender, SenderData, SenderKeySource, SignedFramedContent, Welcome},
     stack,
-    syntax::*,
-    treekem::*,
+    syntax::{Deserialize, Materialize, Serialize},
+    treekem::{RatchetTree, RatchetTreePriv},
 };
 
-use crate::key_schedule::*;
+use crate::key_schedule::{EpochAuthenticator, EpochSecret, KeyScheduleJoinerSecret};
 use crate::transcript_hash::{self, InterimTranscriptHash};
 use heapless::Vec;
 

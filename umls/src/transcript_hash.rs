@@ -1,10 +1,10 @@
 use umls_core::{
-    common::*,
-    crypto::*,
-    io::*,
-    protocol::{self, *},
+    common::Result,
+    crypto::{Crypto, CryptoSizes, Hash, HashOutput, Hmac, Signature},
+    io::{Read, Write},
+    protocol::{self, ConfirmationTag, ConfirmedTranscriptHash, FramedContent},
     stack,
-    syntax::*,
+    syntax::{Deserialize, Serialize},
 };
 
 #[derive(Debug, Serialize, Deserialize)]
