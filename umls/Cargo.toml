@@ -6,6 +6,7 @@ edition = "2021"
 [features]
 std_rng = ["rand/std", "rand/std_rng"]
 stack = ["umls-core/stack"]
+null-crypto = ["umls-core/null-crypto"]
 default = []
 
 [dependencies]

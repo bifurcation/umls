@@ -1,10 +1,10 @@
 use umls_core::{
     common::{Error, Result},
     crypto::{self, BufferVec, Crypto, DependentSizes},
-    io::{Read, Write},
+    io::Write,
     protocol::{CipherSuite, X25519_AES128GCM_SHA256_ED25519},
     protocol::{GroupInfo, GroupSecrets, PathSecret, PrivateMessageContent, SenderData},
-    syntax::{Deserialize, Opaque, Raw, Serialize},
+    syntax::{Opaque, Raw, Serialize},
     treekem::RatchetTree,
 };
 

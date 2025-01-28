@@ -25,33 +25,35 @@ mod test {
     use heapless::Vec;
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use rand_core::CryptoRngCore;
-    use umls_rust_crypto::RustCryptoX25519;
+
+    #[cfg(feature = "null-crypto")]
+    type CryptoProvider = umls_core::crypto::null::NullCrypto;
+
+    #[cfg(not(feature = "null-crypto"))]
+    type CryptoProvider = umls_rust_crypto::RustCryptoX25519;
 
     fn make_user(
         rng: &mut (impl CryptoRngCore + Rng),
         name: &[u8],
-    ) -> (
-        KeyPackagePriv<RustCryptoX25519>,
-        KeyPackage<RustCryptoX25519>,
-    ) {
-        let (sig_priv, sig_key) = RustCryptoX25519::sig_generate(rng).unwrap();
+    ) -> (KeyPackagePriv<CryptoProvider>, KeyPackage<CryptoProvider>) {
+        let (sig_priv, sig_key) = CryptoProvider::sig_generate(rng).unwrap();
         let credential = Credential::Basic(BasicCredential(Opaque::try_from(name).unwrap()));
         KeyPackage::create(rng, sig_priv, sig_key, credential).unwrap()
     }
 
     struct TestGroup {
-        states: Vec<Option<GroupState<RustCryptoX25519>>, 10>,
+        states: Vec<Option<GroupState<CryptoProvider>>, 10>,
         op_count: u64,
     }
 
     impl TestGroup {
-        fn new(group_id: &[u8], creator_name: &[u8]) -> Self {
+        fn new(group_id: &[u8]) -> Self {
             stack::update();
             let mut rng = rand::thread_rng();
 
             let group_id = GroupId(Opaque::try_from(group_id).unwrap());
 
-            let (kp_priv, kp) = make_user(&mut rng, creator_name);
+            let (kp_priv, kp) = make_user(&mut rng, &[0]);
             let state = GroupState::create(&mut rng, kp_priv, kp, group_id).unwrap();
 
             let mut states = Vec::new();
@@ -137,7 +139,7 @@ mod test {
                 self.remove(*committer, roll);
             } else {
                 let committer = members.choose(&mut rng).unwrap();
-                self.add(*committer, b"anonymous");
+                self.add(*committer, &[self.op_count as u8]);
             }
         }
 
@@ -159,19 +161,19 @@ mod test {
 
     #[test]
     fn test_create_group() {
-        let _group = TestGroup::new(b"just alice", b"alice");
+        let _group = TestGroup::new(b"just alice");
     }
 
     #[test]
     fn test_join_group() {
-        let mut group = TestGroup::new(b"alice and bob", b"alice");
+        let mut group = TestGroup::new(b"alice and bob");
         group.add(0, b"bob");
         group.check();
     }
 
     #[test]
     fn test_three_member_group() {
-        let mut group = TestGroup::new(b"alice, bob, carol", b"alice");
+        let mut group = TestGroup::new(b"alice, bob, carol");
         group.add(0, b"bob");
         group.check();
 
@@ -181,7 +183,7 @@ mod test {
 
     #[test]
     fn test_remove() {
-        let mut group = TestGroup::new(b"alice, bob, carol", b"alice");
+        let mut group = TestGroup::new(b"alice, bob, carol");
         group.add(0, b"bob");
         group.check();
 
@@ -194,7 +196,7 @@ mod test {
 
     #[test]
     fn test_large_group() {
-        let mut group = TestGroup::new(b"big group", b"alice");
+        let mut group = TestGroup::new(b"big group");
 
         for i in 1..protocol::consts::MAX_GROUP_SIZE {
             group.add(i - 1, b"bob");
@@ -205,7 +207,7 @@ mod test {
     #[test]
     fn unmerged_leaves() {
         // Create a group of 4 members
-        let mut group = TestGroup::new(b"big group", b"alice");
+        let mut group = TestGroup::new(b"big group");
 
         for i in 1..5 {
             group.add(i - 1, b"bob");
@@ -229,7 +231,7 @@ mod test {
     fn test_random_ops() {
         const STEPS: usize = 100;
 
-        let mut group = TestGroup::new(b"bizarro world", b"alice");
+        let mut group = TestGroup::new(b"bizarro world");
         for _i in 0..STEPS {
             group.random_action();
             group.check();

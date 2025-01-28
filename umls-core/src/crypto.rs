@@ -2,7 +2,7 @@ use crate::common::{Error, Result};
 use crate::io::{CountWriter, Read, Write};
 use crate::protocol::CipherSuite;
 use crate::stack;
-use crate::syntax::{Deserialize, Nil, Opaque, Serialize, Varint};
+use crate::syntax::{Deserialize, Opaque, Serialize, Varint};
 
 use aead::Buffer;
 use core::fmt::Debug;
@@ -78,13 +78,13 @@ impl<const N: usize> Initializers for Opaque<N> {
 }
 
 #[cfg(feature = "null-crypto")]
-impl Initializers for Nil {
+impl Initializers for crate::syntax::Nil {
     fn zero() -> Self {
-        Nil
+        crate::syntax::Nil
     }
 
     fn random(_rng: &mut impl Rng) -> Self {
-        Nil
+        crate::syntax::Nil
     }
 }
 
@@ -541,7 +541,7 @@ pub mod null {
     use rand_core::CryptoRngCore;
 
     #[derive(Clone, PartialEq, Default, Debug)]
-    struct NullCrypto;
+    pub struct NullCrypto;
 
     impl Write for NullCrypto {
         fn write(&mut self, _data: &[u8]) -> Result<()> {
