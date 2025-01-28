@@ -2,13 +2,44 @@ use crate::common::{Error, Result};
 use crate::io::{CountWriter, Read, Write};
 use crate::protocol::CipherSuite;
 use crate::stack;
-use crate::syntax::{Deserialize, Opaque, Serialize, Varint};
+use crate::syntax::{Deserialize, Nil, Opaque, Serialize, Varint};
 
 use aead::Buffer;
 use core::fmt::Debug;
 use heapless::Vec;
 use rand::Rng;
 use rand_core::CryptoRngCore;
+
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+pub struct BufferVec<const N: usize>(pub Vec<u8, N>);
+
+impl<const N: usize> AsRef<[u8]> for BufferVec<N> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl<const N: usize> AsMut<[u8]> for BufferVec<N> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.0.as_mut()
+    }
+}
+
+impl<const N: usize> Write for BufferVec<N> {
+    fn write(&mut self, data: &[u8]) -> Result<()> {
+        self.0.write(data)
+    }
+}
+
+impl<const N: usize> Buffer for BufferVec<N> {
+    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
+        self.0.extend_from_slice(other).map_err(|_| aead::Error)
+    }
+
+    fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+}
 
 pub trait Hash: Default + Write {
     type Output;
@@ -43,6 +74,17 @@ impl<const N: usize> Initializers for Opaque<N> {
         let slice: &mut [u8] = vec.as_mut();
         rng.fill(slice);
         Self(vec)
+    }
+}
+
+#[cfg(feature = "null-crypto")]
+impl Initializers for Nil {
+    fn zero() -> Self {
+        Nil
+    }
+
+    fn random(_rng: &mut impl Rng) -> Self {
+        Nil
     }
 }
 
@@ -485,4 +527,164 @@ where
     C: Crypto,
     E: Clone + Default + AsRef<[u8]> + Write + Serialize + Deserialize + Buffer,
 {
+}
+
+#[cfg(feature = "null-crypto")]
+pub mod null {
+    use crate::common::Result;
+    use crate::crypto::{Buffer, BufferVec, Crypto, DependentSizes, Hash, Hmac};
+    use crate::io::Write;
+    use crate::protocol::{CipherSuite, X25519_AES128GCM_SHA256_ED25519};
+    use crate::syntax::{Nil, Serialize};
+    use crate::treekem::RatchetTree;
+
+    use rand_core::CryptoRngCore;
+
+    #[derive(Clone, PartialEq, Default, Debug)]
+    struct NullCrypto;
+
+    impl Write for NullCrypto {
+        fn write(&mut self, _data: &[u8]) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Hash for NullCrypto {
+        type Output = Nil;
+
+        fn finalize(self) -> Self::Output {
+            Nil
+        }
+    }
+
+    impl Hmac for NullCrypto {
+        type Output = Nil;
+
+        fn new(_key: &[u8]) -> Self {
+            Self
+        }
+
+        fn finalize(self) -> Self::Output {
+            Nil
+        }
+    }
+
+    impl Crypto for NullCrypto {
+        // This is incorrect, but it doesn't matter because this crypto provider will only be used
+        // for internal performance measurement purposes.
+        const CIPHER_SUITE: CipherSuite = X25519_AES128GCM_SHA256_ED25519;
+
+        type Hash = NullCrypto;
+        type Hmac = NullCrypto;
+
+        const HASH_OUTPUT_SIZE: usize = 0;
+        const AEAD_KEY_SIZE: usize = 0;
+        const AEAD_NONCE_SIZE: usize = 0;
+
+        type RawHashOutput = Nil;
+        type HashOutput = Nil;
+
+        type HpkePrivateKey = Nil;
+        type HpkePublicKey = Nil;
+        type HpkeKemOutput = Nil;
+        type HpkeKemSecret = Nil;
+
+        fn hpke_generate(
+            _rng: &mut impl CryptoRngCore,
+        ) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)> {
+            Ok((Nil, Nil))
+        }
+
+        fn hpke_derive(
+            _seed: &Self::HashOutput,
+        ) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)> {
+            Ok((Nil, Nil))
+        }
+
+        fn hpke_priv_to_pub(_encryption_priv: &Self::HpkePrivateKey) -> Self::HpkePublicKey {
+            Nil
+        }
+
+        fn hpke_encap(
+            _rng: &mut impl CryptoRngCore,
+            _encryption_key: &Self::HpkePublicKey,
+        ) -> (Self::HpkeKemOutput, Self::HpkeKemSecret) {
+            (Nil, Nil)
+        }
+
+        fn hpke_decap(
+            _encryption_priv: &Self::HpkePrivateKey,
+            _kem_output: &Self::HpkeKemOutput,
+        ) -> Self::HpkeKemSecret {
+            Nil
+        }
+
+        fn hpke_key_nonce(_secret: Self::HpkeKemSecret) -> (Self::AeadKey, Self::AeadNonce) {
+            (Nil, Nil)
+        }
+
+        type SignaturePrivateKey = Nil;
+        type SignaturePublicKey = Nil;
+        type Signature = Nil;
+
+        fn sig_generate(
+            _rng: &mut impl CryptoRngCore,
+        ) -> Result<(Self::SignaturePrivateKey, Self::SignaturePublicKey)> {
+            Ok((Nil, Nil))
+        }
+
+        // TODO(RLB) Use pre-hashed variant
+        fn sign(
+            _digest: &[u8],
+            _signature_priv: &Self::SignaturePrivateKey,
+        ) -> Result<Self::Signature> {
+            Ok(Nil)
+        }
+
+        // TODO(RLB) Use pre-hashed variant
+        fn verify(
+            _digest: &[u8],
+            _signature: &Self::Signature,
+            _signature_key: &Self::SignaturePublicKey,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        type AeadKey = Nil;
+        type AeadNonce = Nil;
+
+        fn seal(
+            _buf: &mut impl Buffer,
+            _key: &Self::AeadKey,
+            _nonce: &Self::AeadNonce,
+            _aad: &[u8],
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        fn open(
+            _buf: &mut impl Buffer,
+            _key: &Self::AeadKey,
+            _nonce: &Self::AeadNonce,
+            _aad: &[u8],
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    use crate::protocol::{GroupInfo, GroupSecrets, PathSecret, PrivateMessageContent, SenderData};
+
+    const AEAD_OVERHEAD: usize = 0;
+
+    impl DependentSizes for NullCrypto {
+        type SerializedRatchetTree = BufferVec<{ RatchetTree::<NullCrypto>::MAX_SIZE }>;
+        type EncryptedGroupSecrets =
+            BufferVec<{ GroupSecrets::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedGroupInfo = BufferVec<{ GroupInfo::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedPathSecret =
+            BufferVec<{ PathSecret::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedSenderData = BufferVec<{ SenderData::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedPrivateMessageContent =
+            BufferVec<{ PrivateMessageContent::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
+    }
 }

@@ -1,6 +1,6 @@
 use umls_core::{
     common::{Error, Result},
-    crypto::{self, Crypto, DependentSizes},
+    crypto::{self, BufferVec, Crypto, DependentSizes},
     io::{Read, Write},
     protocol::{CipherSuite, X25519_AES128GCM_SHA256_ED25519},
     protocol::{GroupInfo, GroupSecrets, PathSecret, PrivateMessageContent, SenderData},
@@ -83,37 +83,6 @@ impl Write for Hmac {
     fn write(&mut self, data: &[u8]) -> Result<()> {
         self.mac.update(data);
         Ok(())
-    }
-}
-
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
-pub struct BufferVec<const N: usize>(pub Vec<u8, N>);
-
-impl<const N: usize> AsRef<[u8]> for BufferVec<N> {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-impl<const N: usize> AsMut<[u8]> for BufferVec<N> {
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.0.as_mut()
-    }
-}
-
-impl<const N: usize> Write for BufferVec<N> {
-    fn write(&mut self, data: &[u8]) -> Result<()> {
-        self.0.write(data)
-    }
-}
-
-impl<const N: usize> Buffer for BufferVec<N> {
-    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
-        self.0.extend_from_slice(other).map_err(|_| aead::Error)
-    }
-
-    fn truncate(&mut self, len: usize) {
-        self.0.truncate(len);
     }
 }
 

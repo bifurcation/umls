@@ -137,17 +137,17 @@ mod test {
     fn read() {
         // Successful raed
         const DATA: &[u8] = &[0, 2, 4, 6, 8, 10, 12, 14];
-        let mut reader = SliceReader(DATA);
+        let mut reader = DATA;
         assert_eq!(reader.peek().unwrap(), 0);
 
-        let view = reader.read_ref(3).unwrap();
+        let view = reader.read(3).unwrap();
         assert_eq!(view, &DATA[0..3]);
         assert_eq!(reader.peek().unwrap(), 6);
 
         // Failed read
-        assert!(reader.read_ref(6).is_err());
+        assert!(reader.read(6).is_err());
 
-        let view = reader.read_ref(5).unwrap();
+        let view = reader.read(5).unwrap();
         assert_eq!(view, &DATA[3..]);
         assert!(reader.peek().is_err());
     }

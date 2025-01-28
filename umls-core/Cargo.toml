@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-stack = []
+stack = [] # Implement stack measurements
+null-crypto = [] # Expose a null crypto provider that does nothing
+default = ["null-crypto"]
 
 [dependencies]
 derive-serialize = { path = "../umls-macros" }

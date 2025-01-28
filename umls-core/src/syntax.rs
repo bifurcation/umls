@@ -49,6 +49,26 @@ where
 #[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct Nil;
 
+impl<'a> TryFrom<&'a [u8]> for Nil {
+    type Error = Error;
+
+    fn try_from(data: &'a [u8]) -> Result<Self> {
+        data.is_empty().then_some(Nil).ok_or(Error("Size error"))
+    }
+}
+
+impl AsRef<[u8]> for Nil {
+    fn as_ref(&self) -> &[u8] {
+        &[]
+    }
+}
+
+impl AsMut<[u8]> for Nil {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut []
+    }
+}
+
 macro_rules! impl_primitive_serde {
     ($t:ty) => {
         impl Serialize for $t {
