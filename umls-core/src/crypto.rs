@@ -76,17 +76,6 @@ impl<const N: usize> Initializers for Opaque<N> {
     }
 }
 
-#[cfg(feature = "null-crypto")]
-impl Initializers for crate::syntax::Nil {
-    fn zero() -> Self {
-        crate::syntax::Nil
-    }
-
-    fn random(_rng: &mut impl CryptoRng) -> Self {
-        crate::syntax::Nil
-    }
-}
-
 pub trait Crypto: Clone + PartialEq + Default + Debug {
     const CIPHER_SUITE: CipherSuite;
 
@@ -531,14 +520,19 @@ where
 #[cfg(feature = "null-crypto")]
 pub mod null {
     use crate::common::Result;
-    use crate::crypto::{Buffer, BufferVec, Crypto, DependentSizes, Hash, Hmac};
+    use crate::crypto::{Buffer, BufferVec, Crypto, DependentSizes, Hash, Hmac, Initializers};
     use crate::io::Write;
-    use crate::protocol::{CipherSuite, X25519_AES128GCM_SHA256_ED25519};
-    use crate::syntax::{Nil, Serialize};
+    use crate::protocol::{
+        CipherSuite, GroupInfo, GroupSecrets, PathSecret, PrivateMessageContent, SenderData,
+        X25519_AES128GCM_SHA256_ED25519,
+    };
+    use crate::syntax::{Opaque, Raw, Serialize};
     use crate::treekem::RatchetTree;
 
     use rand::CryptoRng;
 
+    /// The NullCrypto library simulates the size impacts of a crypto library, without needing an
+    /// actual crypto library.
     #[derive(Clone, PartialEq, Default, Debug)]
     pub struct NullCrypto;
 
@@ -549,24 +543,36 @@ pub mod null {
     }
 
     impl Hash for NullCrypto {
-        type Output = Nil;
+        type Output = Opaque<{ HASH_OUTPUT_SIZE }>;
 
         fn finalize(self) -> Self::Output {
-            Nil
+            Opaque::zero()
         }
     }
 
     impl Hmac for NullCrypto {
-        type Output = Nil;
+        type Output = Opaque<{ HASH_OUTPUT_SIZE }>;
 
         fn new(_key: &[u8]) -> Self {
             Self
         }
 
         fn finalize(self) -> Self::Output {
-            Nil
+            Opaque::zero()
         }
     }
+
+    const HASH_OUTPUT_SIZE: usize = 32;
+    const HPKE_PRIVATE_KEY_SIZE: usize = 32;
+    const HPKE_PUBLIC_KEY_SIZE: usize = 32;
+    const HPKE_KEM_OUTPUT_SIZE: usize = HPKE_PUBLIC_KEY_SIZE;
+    const HPKE_KEM_SECRET_SIZE: usize = HASH_OUTPUT_SIZE;
+    const SIGNATURE_PRIVATE_KEY_SIZE: usize = 64;
+    const SIGNATURE_PUBLIC_KEY_SIZE: usize = 32;
+    const SIGNATURE_SIZE: usize = 64;
+    const AEAD_OVERHEAD: usize = 16;
+    const AEAD_KEY_SIZE: usize = 16;
+    const AEAD_NONCE_SIZE: usize = 12;
 
     impl Crypto for NullCrypto {
         // This is incorrect, but it doesn't matter because this crypto provider will only be used
@@ -580,56 +586,56 @@ pub mod null {
         const AEAD_KEY_SIZE: usize = 0;
         const AEAD_NONCE_SIZE: usize = 0;
 
-        type RawHashOutput = Nil;
-        type HashOutput = Nil;
+        type RawHashOutput = Raw<{ HASH_OUTPUT_SIZE }>;
+        type HashOutput = Opaque<{ HASH_OUTPUT_SIZE }>;
 
-        type HpkePrivateKey = Nil;
-        type HpkePublicKey = Nil;
-        type HpkeKemOutput = Nil;
-        type HpkeKemSecret = Nil;
+        type HpkePrivateKey = Opaque<{ HPKE_PRIVATE_KEY_SIZE }>;
+        type HpkePublicKey = Opaque<{ HPKE_PUBLIC_KEY_SIZE }>;
+        type HpkeKemOutput = Opaque<{ HPKE_KEM_OUTPUT_SIZE }>;
+        type HpkeKemSecret = Opaque<{ HPKE_KEM_SECRET_SIZE }>;
 
         fn hpke_generate(
             _rng: &mut impl CryptoRng,
         ) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)> {
-            Ok((Nil, Nil))
+            Ok((Opaque::zero(), Opaque::zero()))
         }
 
         fn hpke_derive(
             _seed: &Self::HashOutput,
         ) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)> {
-            Ok((Nil, Nil))
+            Ok((Opaque::zero(), Opaque::zero()))
         }
 
         fn hpke_priv_to_pub(_encryption_priv: &Self::HpkePrivateKey) -> Self::HpkePublicKey {
-            Nil
+            Opaque::zero()
         }
 
         fn hpke_encap(
             _rng: &mut impl CryptoRng,
             _encryption_key: &Self::HpkePublicKey,
         ) -> (Self::HpkeKemOutput, Self::HpkeKemSecret) {
-            (Nil, Nil)
+            (Opaque::zero(), Opaque::zero())
         }
 
         fn hpke_decap(
             _encryption_priv: &Self::HpkePrivateKey,
             _kem_output: &Self::HpkeKemOutput,
         ) -> Self::HpkeKemSecret {
-            Nil
+            Opaque::zero()
         }
 
         fn hpke_key_nonce(_secret: Self::HpkeKemSecret) -> (Self::AeadKey, Self::AeadNonce) {
-            (Nil, Nil)
+            (Opaque::zero(), Opaque::zero())
         }
 
-        type SignaturePrivateKey = Nil;
-        type SignaturePublicKey = Nil;
-        type Signature = Nil;
+        type SignaturePrivateKey = Opaque<{ SIGNATURE_PRIVATE_KEY_SIZE }>;
+        type SignaturePublicKey = Opaque<{ SIGNATURE_PUBLIC_KEY_SIZE }>;
+        type Signature = Opaque<{ SIGNATURE_SIZE }>;
 
         fn sig_generate(
             _rng: &mut impl CryptoRng,
         ) -> Result<(Self::SignaturePrivateKey, Self::SignaturePublicKey)> {
-            Ok((Nil, Nil))
+            Ok((Opaque::zero(), Opaque::zero()))
         }
 
         // TODO(RLB) Use pre-hashed variant
@@ -637,7 +643,7 @@ pub mod null {
             _digest: &[u8],
             _signature_priv: &Self::SignaturePrivateKey,
         ) -> Result<Self::Signature> {
-            Ok(Nil)
+            Ok(Opaque::zero())
         }
 
         // TODO(RLB) Use pre-hashed variant
@@ -649,8 +655,8 @@ pub mod null {
             Ok(())
         }
 
-        type AeadKey = Nil;
-        type AeadNonce = Nil;
+        type AeadKey = Opaque<{ AEAD_KEY_SIZE }>;
+        type AeadNonce = Opaque<{ AEAD_NONCE_SIZE }>;
 
         fn seal(
             _buf: &mut impl Buffer,
@@ -670,10 +676,6 @@ pub mod null {
             Ok(())
         }
     }
-
-    use crate::protocol::{GroupInfo, GroupSecrets, PathSecret, PrivateMessageContent, SenderData};
-
-    const AEAD_OVERHEAD: usize = 0;
 
     impl DependentSizes for NullCrypto {
         type SerializedRatchetTree = BufferVec<{ RatchetTree::<NullCrypto>::MAX_SIZE }>;

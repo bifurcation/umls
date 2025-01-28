@@ -13,7 +13,7 @@ pub use group_state::*;
 pub use umls_core as core;
 pub use umls_core::protocol::KeyPackage;
 
-#[cfg(all(test, feature = "std_rng"))]
+#[cfg(all(test, feature = "thread_rng"))]
 mod test {
     use super::*;
 
@@ -25,7 +25,7 @@ mod test {
     };
 
     use heapless::Vec;
-    use rand::{seq::SliceRandom, CryptoRng, Rng, SeedableRng};
+    use rand::{seq::IndexedRandom, CryptoRng, Rng, SeedableRng};
 
     #[cfg(feature = "null-crypto")]
     type CryptoProvider = umls_core::crypto::null::NullCrypto;
@@ -50,7 +50,7 @@ mod test {
     impl TestGroup {
         fn new(group_id: &[u8]) -> Self {
             stack::update();
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
 
             let group_id = GroupId(Opaque::try_from(group_id).unwrap());
 
@@ -67,7 +67,7 @@ mod test {
 
         fn add(&mut self, committer: usize, joiner_name: &[u8]) -> usize {
             stack::update();
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
 
             let (kp_priv, kp) = make_user(&mut rng, joiner_name);
             let op = Operation::Add(kp.clone());
@@ -99,7 +99,7 @@ mod test {
         }
 
         fn remove(&mut self, committer: usize, removed: usize) {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
 
             let op = Operation::Remove(LeafIndex(removed as u32));
 
@@ -122,7 +122,7 @@ mod test {
             self.op_count += 1;
             let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(self.op_count);
 
-            let roll: usize = rng.gen_range(0..protocol::consts::MAX_GROUP_SIZE);
+            let roll: usize = rng.random_range(0..protocol::consts::MAX_GROUP_SIZE);
 
             let members: Vec<usize, { protocol::consts::MAX_GROUP_SIZE }> = self
                 .states

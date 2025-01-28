@@ -1,7 +1,7 @@
-#[cfg(not(all(feature = "stack", feature = "std_rng")))]
+#[cfg(not(all(feature = "stack", feature = "thread_rng")))]
 fn main() {}
 
-#[cfg(all(feature = "stack", feature = "std_rng"))]
+#[cfg(all(feature = "stack", feature = "thread_rng"))]
 fn main() {
     use umls::*;
     use umls_core::protocol::consts;
