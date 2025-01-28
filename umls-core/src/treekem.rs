@@ -14,8 +14,7 @@ use crate::tree_math::{LeafCount, NodeCount, NodeIndex};
 
 use heapless::{FnvIndexMap, Vec};
 use itertools::Itertools;
-use rand::Rng;
-use rand_core::CryptoRngCore;
+use rand::CryptoRng;
 
 mod consts {
     pub use crate::protocol::consts::MAX_GROUP_SIZE;
@@ -487,7 +486,7 @@ impl<C: Crypto> RatchetTree<C> {
 
     pub fn update_direct_path(
         &mut self,
-        rng: &mut (impl CryptoRngCore + Rng),
+        rng: &mut impl CryptoRng,
         from: LeafIndex,
         signature_priv: &SignaturePrivateKey<C>,
     ) -> Result<(RatchetTreePriv<C>, UpdatePath<C>)>
@@ -561,7 +560,7 @@ impl<C: Crypto> RatchetTree<C> {
 
     pub fn encrypt_path_secrets(
         &self,
-        rng: &mut (impl CryptoRngCore + Rng),
+        rng: &mut impl CryptoRng,
         from: LeafIndex,
         group_context: &GroupContext<C>,
         ratchet_tree_priv: &RatchetTreePriv<C>,

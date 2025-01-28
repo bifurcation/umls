@@ -12,9 +12,39 @@ use aes_gcm::{aead::Buffer, AeadCore, AeadInPlace, Aes128Gcm, KeyInit};
 use ed25519_dalek::{Signer, SigningKey, Verifier, VerifyingKey};
 use heapless::Vec;
 use hmac::{digest::FixedOutput, Mac, SimpleHmac};
-use rand_core::CryptoRngCore;
+use rand::CryptoRng;
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
+
+// XXX(RLB) The `dalek` implementations expect an RNG complying to an old version of the `rand`
+// crate.  This wrapper just fixes the version mismatch.
+struct BackportRng<'a, T: CryptoRng>(&'a mut T);
+
+impl<'a, T> old_rand_core::RngCore for BackportRng<'a, T>
+where
+    T: CryptoRng,
+{
+    fn next_u32(&mut self) -> u32 {
+        rand::RngCore::next_u32(&mut self.0)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        rand::RngCore::next_u64(&mut self.0)
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        rand::RngCore::fill_bytes(&mut self.0, dest)
+    }
+
+    fn try_fill_bytes(
+        &mut self,
+        dest: &mut [u8],
+    ) -> core::result::Result<(), old_rand_core::Error> {
+        Ok(rand::RngCore::fill_bytes(&mut self.0, dest))
+    }
+}
+
+impl<'a, T> old_rand_core::CryptoRng for BackportRng<'a, T> where T: CryptoRng {}
 
 const HASH_OUTPUT_SIZE: usize = 32;
 const HPKE_PRIVATE_KEY_SIZE: usize = 32;
@@ -209,9 +239,9 @@ impl Crypto for RustCryptoX25519 {
     type HpkeKemSecret = Opaque<{ HPKE_KEM_SECRET_SIZE }>;
 
     fn hpke_generate(
-        rng: &mut impl CryptoRngCore,
+        rng: &mut impl CryptoRng,
     ) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)> {
-        let raw_priv = StaticSecret::random_from_rng(rng);
+        let raw_priv = StaticSecret::random_from_rng(&mut BackportRng(rng));
         let raw_pub = PublicKey::from(&raw_priv);
 
         let hpke_priv = Self::HpkePrivateKey::try_from(raw_priv.as_bytes().as_ref()).unwrap();
@@ -245,13 +275,13 @@ impl Crypto for RustCryptoX25519 {
     }
 
     fn hpke_encap(
-        rng: &mut impl CryptoRngCore,
+        rng: &mut impl CryptoRng,
         encryption_key: &Self::HpkePublicKey,
     ) -> (Self::HpkeKemOutput, Self::HpkeKemSecret) {
         let pk_r_m: [u8; 32] = encryption_key.as_ref().try_into().unwrap();
         let pk_r = PublicKey::from(pk_r_m);
 
-        let sk_e = StaticSecret::random_from_rng(rng);
+        let sk_e = StaticSecret::random_from_rng(BackportRng(rng));
         let enc = PublicKey::from(&sk_e);
 
         let dh = sk_e.diffie_hellman(&pk_r);
@@ -298,9 +328,9 @@ impl Crypto for RustCryptoX25519 {
     type Signature = Opaque<{ SIGNATURE_SIZE }>;
 
     fn sig_generate(
-        rng: &mut impl CryptoRngCore,
+        rng: &mut impl CryptoRng,
     ) -> Result<(Self::SignaturePrivateKey, Self::SignaturePublicKey)> {
-        let raw_priv = SigningKey::generate(rng);
+        let raw_priv = SigningKey::generate(&mut BackportRng(rng));
         let raw_pub = raw_priv.verifying_key();
 
         let priv_bytes = raw_priv.to_keypair_bytes();

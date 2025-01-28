@@ -11,7 +11,7 @@ use umls_core::{
     tree_math::LeafCount,
 };
 
-use rand::Rng;
+use rand::CryptoRng;
 
 /*
                     epoch_secret[n-1]
@@ -82,7 +82,7 @@ pub struct WelcomeSecret<C: Crypto>(HashOutput<C>);
 pub struct EpochAuthenticator<C: Crypto>(HashOutput<C>);
 
 impl<C: Crypto> EpochSecret<C> {
-    pub fn new(rng: &mut impl Rng) -> Self {
+    pub fn new(rng: &mut impl CryptoRng) -> Self {
         stack::update();
         Self(C::HashOutput::random(rng))
     }

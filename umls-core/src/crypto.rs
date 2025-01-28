@@ -7,8 +7,7 @@ use crate::syntax::{Deserialize, Opaque, Serialize, Varint};
 use aead::Buffer;
 use core::fmt::Debug;
 use heapless::Vec;
-use rand::Rng;
-use rand_core::CryptoRngCore;
+use rand::{CryptoRng, Rng};
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct BufferVec<const N: usize>(pub Vec<u8, N>);
@@ -56,7 +55,7 @@ pub trait Hmac: Write {
 
 pub trait Initializers {
     fn zero() -> Self;
-    fn random(rng: &mut impl Rng) -> Self;
+    fn random(rng: &mut impl CryptoRng) -> Self;
 }
 
 impl<const N: usize> Initializers for Opaque<N> {
@@ -67,7 +66,7 @@ impl<const N: usize> Initializers for Opaque<N> {
         Self(vec)
     }
 
-    fn random(rng: &mut impl Rng) -> Self {
+    fn random(rng: &mut impl CryptoRng) -> Self {
         stack::update();
         let mut vec = Vec::new();
         vec.resize_default(N).unwrap();
@@ -83,7 +82,7 @@ impl Initializers for crate::syntax::Nil {
         crate::syntax::Nil
     }
 
-    fn random(_rng: &mut impl Rng) -> Self {
+    fn random(_rng: &mut impl CryptoRng) -> Self {
         crate::syntax::Nil
     }
 }
@@ -121,12 +120,12 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
     type HpkeKemSecret: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
 
     fn hpke_generate(
-        rng: &mut impl CryptoRngCore,
+        rng: &mut impl CryptoRng,
     ) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)>;
     fn hpke_derive(seed: &Self::HashOutput) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)>;
     fn hpke_priv_to_pub(encryption_priv: &Self::HpkePrivateKey) -> Self::HpkePublicKey;
     fn hpke_encap(
-        rng: &mut impl CryptoRngCore,
+        rng: &mut impl CryptoRng,
         encryption_key: &Self::HpkePublicKey,
     ) -> (Self::HpkeKemOutput, Self::HpkeKemSecret);
     fn hpke_decap(
@@ -140,7 +139,7 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
     type Signature: Clone + Debug + PartialEq + Serialize + Deserialize;
 
     fn sig_generate(
-        rng: &mut impl CryptoRngCore,
+        rng: &mut impl CryptoRng,
     ) -> Result<(Self::SignaturePrivateKey, Self::SignaturePublicKey)>;
     fn sign(digest: &[u8], signature_priv: &Self::SignaturePrivateKey) -> Result<Self::Signature>;
     fn verify(
@@ -495,7 +494,7 @@ where
 {
     fn hpke_seal(
         &self,
-        rng: &mut impl CryptoRngCore,
+        rng: &mut impl CryptoRng,
         encryption_key: &HpkePublicKey<C>,
         aad: &[u8],
     ) -> Result<HpkeCiphertext<C, E>> {
@@ -538,7 +537,7 @@ pub mod null {
     use crate::syntax::{Nil, Serialize};
     use crate::treekem::RatchetTree;
 
-    use rand_core::CryptoRngCore;
+    use rand::CryptoRng;
 
     #[derive(Clone, PartialEq, Default, Debug)]
     pub struct NullCrypto;
@@ -590,7 +589,7 @@ pub mod null {
         type HpkeKemSecret = Nil;
 
         fn hpke_generate(
-            _rng: &mut impl CryptoRngCore,
+            _rng: &mut impl CryptoRng,
         ) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)> {
             Ok((Nil, Nil))
         }
@@ -606,7 +605,7 @@ pub mod null {
         }
 
         fn hpke_encap(
-            _rng: &mut impl CryptoRngCore,
+            _rng: &mut impl CryptoRng,
             _encryption_key: &Self::HpkePublicKey,
         ) -> (Self::HpkeKemOutput, Self::HpkeKemSecret) {
             (Nil, Nil)
@@ -628,7 +627,7 @@ pub mod null {
         type Signature = Nil;
 
         fn sig_generate(
-            _rng: &mut impl CryptoRngCore,
+            _rng: &mut impl CryptoRng,
         ) -> Result<(Self::SignaturePrivateKey, Self::SignaturePublicKey)> {
             Ok((Nil, Nil))
         }

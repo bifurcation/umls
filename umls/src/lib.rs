@@ -8,7 +8,9 @@ mod group_state;
 mod key_schedule;
 mod transcript_hash;
 
+// TODO(RLB) Clean up the API
 pub use group_state::*;
+pub use umls_core as core;
 pub use umls_core::protocol::KeyPackage;
 
 #[cfg(all(test, feature = "std_rng"))]
@@ -23,8 +25,7 @@ mod test {
     };
 
     use heapless::Vec;
-    use rand::{seq::SliceRandom, Rng, SeedableRng};
-    use rand_core::CryptoRngCore;
+    use rand::{seq::SliceRandom, CryptoRng, Rng, SeedableRng};
 
     #[cfg(feature = "null-crypto")]
     type CryptoProvider = umls_core::crypto::null::NullCrypto;
@@ -33,7 +34,7 @@ mod test {
     type CryptoProvider = umls_rust_crypto::RustCryptoX25519;
 
     fn make_user(
-        rng: &mut (impl CryptoRngCore + Rng),
+        rng: &mut impl CryptoRng,
         name: &[u8],
     ) -> (KeyPackagePriv<CryptoProvider>, KeyPackage<CryptoProvider>) {
         let (sig_priv, sig_key) = CryptoProvider::sig_generate(rng).unwrap();

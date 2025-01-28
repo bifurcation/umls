@@ -23,12 +23,11 @@ use crate::key_schedule::{EpochAuthenticator, EpochSecret, KeyScheduleJoinerSecr
 use crate::transcript_hash::{self, InterimTranscriptHash};
 use heapless::Vec;
 
-use rand::Rng;
-use rand_core::CryptoRngCore;
+use rand::{CryptoRng, Rng};
 
 pub trait MakeKeyPackage<C: Crypto> {
     fn create(
-        rng: &mut (impl Rng + CryptoRngCore),
+        rng: &mut impl CryptoRng,
         signature_priv: SignaturePrivateKey<C>,
         signature_key: SignaturePublicKey<C>,
         credential: Credential,
@@ -37,7 +36,7 @@ pub trait MakeKeyPackage<C: Crypto> {
 
 impl<C: Crypto> MakeKeyPackage<C> for KeyPackage<C> {
     fn create(
-        rng: &mut (impl Rng + CryptoRngCore),
+        rng: &mut impl CryptoRng,
         signature_priv: SignaturePrivateKey<C>,
         signature_key: SignaturePublicKey<C>,
         credential: Credential,
@@ -106,7 +105,7 @@ impl<C: CryptoSizes> GroupState<C> {
     }
 
     pub fn create(
-        rng: &mut (impl Rng + CryptoRngCore),
+        rng: &mut impl CryptoRng,
         key_package_priv: KeyPackagePriv<C>,
         key_package: KeyPackage<C>,
         group_id: GroupId,
@@ -261,7 +260,7 @@ impl<C: CryptoSizes> GroupState<C> {
     #[allow(clippy::too_many_lines)]
     pub fn send_commit(
         &mut self,
-        rng: &mut (impl Rng + CryptoRngCore),
+        rng: &mut impl CryptoRng,
         operation: Operation<C>,
     ) -> Result<(PrivateMessage<C>, Option<Welcome<C>>)> {
         stack::update();
@@ -376,7 +375,7 @@ impl<C: CryptoSizes> GroupState<C> {
         let sender_data = SenderData {
             leaf_index: self.my_index,
             generation,
-            reuse_guard: ReuseGuard(rng.gen()),
+            reuse_guard: ReuseGuard(rng.random()),
         };
 
         let private_message = PrivateMessage::new(
