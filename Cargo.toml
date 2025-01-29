@@ -8,4 +8,4 @@ members = [
 ]
 
 [profile.dev]
-#opt-level = "s"
+opt-level = "s"

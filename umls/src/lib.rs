@@ -28,10 +28,10 @@ mod test {
     use rand::{seq::IndexedRandom, CryptoRng, Rng, SeedableRng};
 
     #[cfg(feature = "null-crypto")]
-    type CryptoProvider = umls_core::crypto::null::NullCrypto;
+    use umls_core::crypto::null::NullCrypto as CryptoProvider;
 
     #[cfg(not(feature = "null-crypto"))]
-    type CryptoProvider = umls_rust_crypto::RustCryptoX25519;
+    use umls_rust_crypto::RustCryptoX25519 as CryptoProvider;
 
     fn make_user(
         rng: &mut impl CryptoRng,

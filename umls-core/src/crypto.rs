@@ -32,7 +32,7 @@ impl<const N: usize> Write for BufferVec<N> {
 
 impl<const N: usize> Buffer for BufferVec<N> {
     fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
-        self.0.extend_from_slice(other).map_err(|_| aead::Error)
+        self.0.extend_from_slice(other).map_err(|()| aead::Error)
     }
 
     fn truncate(&mut self, len: usize) {

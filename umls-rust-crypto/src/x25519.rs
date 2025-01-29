@@ -20,7 +20,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 // crate.  This wrapper just fixes the version mismatch.
 struct BackportRng<'a, T: CryptoRng>(&'a mut T);
 
-impl<'a, T> old_rand_core::RngCore for BackportRng<'a, T>
+impl<T> old_rand_core::RngCore for BackportRng<'_, T>
 where
     T: CryptoRng,
 {
@@ -33,18 +33,19 @@ where
     }
 
     fn fill_bytes(&mut self, dest: &mut [u8]) {
-        rand::RngCore::fill_bytes(&mut self.0, dest)
+        rand::RngCore::fill_bytes(&mut self.0, dest);
     }
 
     fn try_fill_bytes(
         &mut self,
         dest: &mut [u8],
     ) -> core::result::Result<(), old_rand_core::Error> {
-        Ok(rand::RngCore::fill_bytes(&mut self.0, dest))
+        rand::RngCore::fill_bytes(&mut self.0, dest);
+        Ok(())
     }
 }
 
-impl<'a, T> old_rand_core::CryptoRng for BackportRng<'a, T> where T: CryptoRng {}
+impl<T> old_rand_core::CryptoRng for BackportRng<'_, T> where T: CryptoRng {}
 
 const HASH_OUTPUT_SIZE: usize = 32;
 const HPKE_PRIVATE_KEY_SIZE: usize = 32;
@@ -165,7 +166,7 @@ mod hpke {
         h.write(info).unwrap();
 
         let mut out = h.finalize();
-        out.0.resize_default(len as usize).unwrap();
+        out.0.resize_default(len).unwrap();
         out
     }
 
@@ -241,7 +242,7 @@ impl Crypto for RustCryptoX25519 {
     fn hpke_generate(
         rng: &mut impl CryptoRng,
     ) -> Result<(Self::HpkePrivateKey, Self::HpkePublicKey)> {
-        let raw_priv = StaticSecret::random_from_rng(&mut BackportRng(rng));
+        let raw_priv = StaticSecret::random_from_rng(BackportRng(rng));
         let raw_pub = PublicKey::from(&raw_priv);
 
         let hpke_priv = Self::HpkePrivateKey::try_from(raw_priv.as_bytes().as_ref()).unwrap();

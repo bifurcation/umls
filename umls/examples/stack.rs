@@ -6,12 +6,17 @@ fn main() {
     use umls::*;
     use umls_core::protocol::consts;
     use umls_core::{crypto::*, protocol::*, stack, syntax::*};
-    use umls_rust_crypto::RustCryptoX25519;
 
-    let mut rng = rand::thread_rng();
+    #[cfg(feature = "null-crypto")]
+    use umls_core::crypto::null::NullCrypto as CryptoProvider;
+
+    #[cfg(not(feature = "null-crypto"))]
+    use umls_rust_crypto::RustCryptoX25519 as CryptoProvider;
+
+    let mut rng = rand::rng();
 
     // Create the first user
-    let (sig_priv, sig_key) = RustCryptoX25519::sig_generate(&mut rng).unwrap();
+    let (sig_priv, sig_key) = CryptoProvider::sig_generate(&mut rng).unwrap();
     let credential = Credential::Basic(BasicCredential(
         Opaque::try_from(b"alice".as_slice()).unwrap(),
     ));
@@ -21,11 +26,11 @@ fn main() {
     // Create the group
     let group_id = GroupId(Opaque::try_from(b"group_id".as_slice()).unwrap());
     let (mut state_a, create_group_stack) = stack::usage(|| {
-        GroupState::<RustCryptoX25519>::create(&mut rng, kp_priv, kp, group_id).unwrap()
+        GroupState::<CryptoProvider>::create(&mut rng, kp_priv, kp, group_id).unwrap()
     });
 
     // Create the second user
-    let (sig_priv, sig_key) = RustCryptoX25519::sig_generate(&mut rng).unwrap();
+    let (sig_priv, sig_key) = CryptoProvider::sig_generate(&mut rng).unwrap();
     let credential = Credential::Basic(BasicCredential(
         Opaque::try_from(b"bob".as_slice()).unwrap(),
     ));
@@ -50,7 +55,7 @@ fn main() {
 
     if consts::MAX_GROUP_SIZE > 2 {
         // Create the third user
-        let (sig_priv, sig_key) = RustCryptoX25519::sig_generate(&mut rng).unwrap();
+        let (sig_priv, sig_key) = CryptoProvider::sig_generate(&mut rng).unwrap();
         let credential = Credential::Basic(BasicCredential(
             Opaque::try_from(b"carol".as_slice()).unwrap(),
         ));

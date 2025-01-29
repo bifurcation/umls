@@ -1,8 +1,13 @@
 use umls::*;
 use umls_core::{crypto::*, protocol::*, syntax::*};
-use umls_rust_crypto::RustCryptoX25519 as Crypto;
 
 use tabled::{settings::style::Style, Table, Tabled};
+
+#[cfg(not(feature = "null-crypto"))]
+use umls_rust_crypto::RustCryptoX25519 as CryptoProvider;
+
+#[cfg(feature = "null-crypto")]
+use umls_core::crypto::null::NullCrypto as CryptoProvider;
 
 #[derive(Tabled)]
 struct TypeInfo {
@@ -29,16 +34,16 @@ fn type_info<T: Serialize>() -> TypeInfo {
 
 fn main() {
     let data = vec![
-        type_info::<SignaturePrivateKey<Crypto>>(),
-        type_info::<SignaturePublicKey<Crypto>>(),
+        type_info::<SignaturePrivateKey<CryptoProvider>>(),
+        type_info::<SignaturePublicKey<CryptoProvider>>(),
         type_info::<Credential>(),
-        type_info::<LeafNode<Crypto>>(),
-        type_info::<KeyPackagePriv<Crypto>>(),
-        type_info::<KeyPackage<Crypto>>(),
+        type_info::<LeafNode<CryptoProvider>>(),
+        type_info::<KeyPackagePriv<CryptoProvider>>(),
+        type_info::<KeyPackage<CryptoProvider>>(),
         type_info::<GroupId>(),
-        type_info::<GroupState<Crypto>>(),
-        type_info::<Welcome<Crypto>>(),
-        type_info::<PrivateMessage<Crypto>>(),
+        type_info::<GroupState<CryptoProvider>>(),
+        type_info::<Welcome<CryptoProvider>>(),
+        type_info::<PrivateMessage<CryptoProvider>>(),
     ];
 
     let mut table = Table::new(&data);
