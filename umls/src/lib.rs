@@ -31,7 +31,7 @@ mod test {
     use umls_core::crypto::null::NullCrypto as CryptoProvider;
 
     #[cfg(not(feature = "null-crypto"))]
-    use umls_rust_crypto::RustCryptoX25519 as CryptoProvider;
+    use umls_rust_crypto::RustCryptoP256 as CryptoProvider;
 
     fn make_user(
         rng: &mut impl CryptoRng,
@@ -43,7 +43,7 @@ mod test {
     }
 
     struct TestGroup {
-        states: Vec<Option<GroupState<CryptoProvider>>, 10>,
+        states: Vec<Option<GroupState<CryptoProvider>>, { protocol::consts::MAX_GROUP_SIZE }>,
         op_count: u64,
     }
 
@@ -88,6 +88,7 @@ mod test {
             let joiner = match self.states.iter().position(|s| s.is_none()) {
                 Some(index) => index,
                 None => {
+                    println!("states.len = {}", self.states.len());
                     self.states.push(None).unwrap();
                     self.states.len() - 1
                 }

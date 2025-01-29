@@ -4,7 +4,7 @@ use umls_core::{crypto::*, protocol::*, syntax::*};
 use tabled::{settings::style::Style, Table, Tabled};
 
 #[cfg(not(feature = "null-crypto"))]
-use umls_rust_crypto::RustCryptoX25519 as CryptoProvider;
+use umls_rust_crypto::RustCryptoP256 as CryptoProvider;
 
 #[cfg(feature = "null-crypto")]
 use umls_core::crypto::null::NullCrypto as CryptoProvider;

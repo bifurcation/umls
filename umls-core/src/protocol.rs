@@ -45,7 +45,7 @@ pub mod consts {
     pub const MAX_JOINERS_PER_WELCOME: usize = 1;
 
     // RatchetTree
-    pub const MAX_GROUP_SIZE: usize = 64;
+    pub const MAX_GROUP_SIZE: usize = 8;
     pub const MAX_RESOLUTION_SIZE: usize = MAX_GROUP_SIZE / 2;
     pub const MAX_TREE_DEPTH: usize = (MAX_GROUP_SIZE.ilog2() as usize) + 1;
     pub const EXTENSION_TYPE_RATCHET_TREE: ExtensionType = ExtensionType(0x0002);
