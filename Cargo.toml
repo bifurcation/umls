@@ -9,3 +9,5 @@ members = [
 
 [profile.dev]
 opt-level = "s"
+lto = "fat"
+codegen-units = 1

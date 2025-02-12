@@ -1,5 +1,5 @@
 use umls::*;
-use umls_core::{crypto::*, protocol::*, syntax::*};
+use umls_core::{crypto::*, protocol::*, syntax::*, treekem::*};
 
 use tabled::{settings::style::Style, Table, Tabled};
 
@@ -41,6 +41,7 @@ fn main() {
         type_info::<KeyPackagePriv<CryptoProvider>>(),
         type_info::<KeyPackage<CryptoProvider>>(),
         type_info::<GroupId>(),
+        type_info::<RatchetTree<CryptoProvider>>(),
         type_info::<GroupState<CryptoProvider>>(),
         type_info::<Welcome<CryptoProvider>>(),
         type_info::<PrivateMessage<CryptoProvider>>(),
