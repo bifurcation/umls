@@ -1,10 +1,10 @@
 use crate::common::{Error, Result};
-use crate::io::{CountWriter, Read, Write};
+use crate::io::{BorrowRead, CountWriter, Read, Write};
 use crate::stack;
 
 use heapless::Vec;
 
-pub use derive_serialize::{Deserialize, Materialize, Serialize};
+pub use derive_serialize::{Deserialize, Materialize, Serialize, View};
 
 pub trait Serialize {
     /// The maximum size of a serialized value
@@ -12,6 +12,16 @@ pub trait Serialize {
 
     /// Serialize the provided object to the stream.
     fn serialize(&self, writer: &mut impl Write) -> Result<()>;
+}
+
+pub trait View {
+    type View<'a>: BorrowDeserialize<'a>
+    where
+        Self: 'a;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a>
+    where
+        Self: 'a;
 }
 
 pub trait Materialize: Serialize {
@@ -30,6 +40,11 @@ pub trait Materialize: Serialize {
 pub trait Deserialize: Sized {
     /// Read an object of this type from the stream.
     fn deserialize(reader: &mut impl Read) -> Result<Self>;
+}
+
+pub trait BorrowDeserialize<'a>: Sized {
+    /// Read an object of this type from the stream.
+    fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self>;
 }
 
 // Serialization by reference
@@ -80,6 +95,18 @@ macro_rules! impl_primitive_serde {
             }
         }
 
+        impl View for $t {
+            type View<'a> = $t;
+
+            fn as_view<'a>(&'a self) -> Self::View<'a>
+            where
+                Self: 'a,
+            {
+                stack::update();
+                *self
+            }
+        }
+
         impl Deserialize for $t {
             fn deserialize(reader: &mut impl Read) -> Result<Self> {
                 const N: usize = core::mem::size_of::<$t>();
@@ -88,6 +115,12 @@ macro_rules! impl_primitive_serde {
                 let mut bytes = [0; N];
                 bytes.copy_from_slice(reader.read(N)?);
                 Ok(Self::from_be_bytes(bytes))
+            }
+        }
+
+        impl<'a> BorrowDeserialize<'a> for $t {
+            fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+                <$t>::deserialize(reader)
             }
         }
     };
@@ -117,6 +150,24 @@ where
     }
 }
 
+impl<T> View for Option<T>
+where
+    T: View,
+{
+    type View<'a>
+        = Option<T::View<'a>>
+    where
+        T: 'a;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a>
+    where
+        T: 'a,
+    {
+        stack::update();
+        self.as_ref().map(View::as_view)
+    }
+}
+
 impl<T> Deserialize for Option<T>
 where
     T: Deserialize,
@@ -126,6 +177,20 @@ where
         match u8::deserialize(reader)? {
             0 => Ok(None),
             1 => Ok(Some(T::deserialize(reader)?)),
+            _ => Err(Error("Invalid encoding")),
+        }
+    }
+}
+
+impl<'a, T> BorrowDeserialize<'a> for Option<T>
+where
+    T: BorrowDeserialize<'a>,
+{
+    fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+        stack::update();
+        match u8::deserialize(reader)? {
+            0 => Ok(None),
+            1 => Ok(Some(T::borrow_deserialize(reader)?)),
             _ => Err(Error("Invalid encoding")),
         }
     }
@@ -141,12 +206,32 @@ impl<const N: usize> Serialize for [u8; N] {
     }
 }
 
+impl<const N: usize> View for [u8; N] {
+    type View<'a> = &'a [u8; N];
+
+    fn as_view<'a>(&'a self) -> Self::View<'a>
+    where
+        Self: 'a,
+    {
+        stack::update();
+        self
+    }
+}
+
 impl<const N: usize> Deserialize for [u8; N] {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
         stack::update();
         let mut arr = [0; N];
         arr.copy_from_slice(reader.read(N)?);
         Ok(arr)
+    }
+}
+
+impl<'a, const N: usize> BorrowDeserialize<'a> for &'a [u8; N] {
+    fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+        stack::update();
+        let slice = reader.borrow_read(N)?;
+        Self::try_from(slice).map_err(move |_| Error("Size error"))
     }
 }
 
@@ -180,6 +265,18 @@ impl Serialize for Varint {
     }
 }
 
+impl View for Varint {
+    type View<'a> = Varint;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a>
+    where
+        Self: 'a,
+    {
+        stack::update();
+        *self
+    }
+}
+
 impl Deserialize for Varint {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
         stack::update();
@@ -198,6 +295,12 @@ impl Deserialize for Varint {
         };
 
         Ok(Self(val))
+    }
+}
+
+impl<'a> BorrowDeserialize<'a> for Varint {
+    fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+        Varint::deserialize(reader)
     }
 }
 
@@ -221,6 +324,24 @@ impl<T: Serialize, const N: usize> Serialize for Vec<T, N> {
     }
 }
 
+impl<T, const N: usize> View for Vec<T, N>
+where
+    T: View,
+{
+    type View<'a>
+        = Vec<T::View<'a>, N>
+    where
+        T: 'a;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a>
+    where
+        Self: 'a,
+    {
+        stack::update();
+        self.iter().map(View::as_view).collect()
+    }
+}
+
 impl<T: Deserialize, const N: usize> Deserialize for Vec<T, N> {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
         stack::update();
@@ -237,9 +358,33 @@ impl<T: Deserialize, const N: usize> Deserialize for Vec<T, N> {
     }
 }
 
+impl<'a, T, const N: usize> BorrowDeserialize<'a> for Vec<T, N>
+where
+    T: BorrowDeserialize<'a>,
+{
+    fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+        stack::update();
+        let len = Varint::deserialize(reader)?;
+        let mut sub_reader = reader.take(len.0)?;
+
+        let mut vec = Vec::new();
+        let mut empty = sub_reader.is_empty();
+        while !empty {
+            vec.push(T::borrow_deserialize(&mut sub_reader)?)
+                .map_err(|_| Error("Too many elements"))?;
+            empty = sub_reader.is_empty();
+        }
+
+        Ok(vec)
+    }
+}
+
 // Raw
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Raw<const N: usize>(pub Vec<u8, N>);
+
+#[derive(Clone, PartialEq, Debug)]
+pub struct RawView<'a, const N: usize>(pub &'a [u8; N]);
 
 impl<const N: usize> AsRef<[u8]> for Raw<N> {
     fn as_ref(&self) -> &[u8] {
@@ -267,6 +412,19 @@ impl<const N: usize> Serialize for Raw<N> {
     }
 }
 
+impl<const N: usize> View for Raw<N> {
+    type View<'a> = RawView<'a, N>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a>
+    where
+        Self: 'a,
+    {
+        stack::update();
+        let slice_view: &[u8] = self.0.as_ref();
+        RawView(slice_view.try_into().unwrap())
+    }
+}
+
 impl<const N: usize> Deserialize for Raw<N> {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
         stack::update();
@@ -275,9 +433,20 @@ impl<const N: usize> Deserialize for Raw<N> {
     }
 }
 
+impl<'a, const N: usize> BorrowDeserialize<'a> for RawView<'a, N> {
+    fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+        stack::update();
+        let array_ref = <&[u8; N]>::borrow_deserialize(reader)?;
+        Ok(Self(array_ref))
+    }
+}
+
 // Opaque
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Opaque<const N: usize>(pub Vec<u8, N>);
+
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct OpaqueView<'a, const N: usize>(pub &'a [u8]);
 
 impl<const N: usize> AsRef<[u8]> for Opaque<N> {
     fn as_ref(&self) -> &[u8] {
@@ -313,6 +482,18 @@ impl<const N: usize> Serialize for Opaque<N> {
     }
 }
 
+impl<const N: usize> View for Opaque<N> {
+    type View<'a> = OpaqueView<'a, N>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a>
+    where
+        Self: 'a,
+    {
+        stack::update();
+        OpaqueView(self.0.as_ref())
+    }
+}
+
 impl<const N: usize> Deserialize for Opaque<N> {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
         stack::update();
@@ -321,6 +502,15 @@ impl<const N: usize> Deserialize for Opaque<N> {
         let vec = Vec::from_slice(reader.read(len.0)?).map_err(|()| Error("Too many elements"))?;
 
         Ok(Self(vec))
+    }
+}
+
+impl<'a, const N: usize> BorrowDeserialize<'a> for OpaqueView<'a, N> {
+    fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+        stack::update();
+        let len = Varint::deserialize(reader)?;
+        let slice = reader.borrow_read(len.0)?;
+        Ok(Self(slice))
     }
 }
 

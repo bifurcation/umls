@@ -6,9 +6,9 @@ use crate::crypto::{
     SerializedRatchetTree, Signature, SignatureLabel, SignaturePrivateKey, SignaturePublicKey,
     Signed,
 };
-use crate::io::{Read, Write};
+use crate::io::{BorrowRead, Read, Write};
 use crate::stack;
-use crate::syntax::{Deserialize, Materialize, Nil, Opaque, Serialize};
+use crate::syntax::{BorrowDeserialize, Deserialize, Materialize, Nil, Opaque, Serialize, View};
 
 use heapless::Vec;
 
@@ -118,7 +118,7 @@ impl Capabilities {
     }
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct Lifetime {
     not_before: u64,
     not_after: u64,

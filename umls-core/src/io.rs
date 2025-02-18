@@ -24,6 +24,12 @@ pub trait Read: Sized {
     fn peek(&self) -> Result<u8>;
 }
 
+pub trait BorrowRead<'a>: Sized + Read {
+    /// Returns a reference to the first `n` bytes read.  Returns an error if less than `n` bytes
+    /// are available.
+    fn borrow_read(&mut self, n: usize) -> Result<&'a [u8]>;
+}
+
 impl<const N: usize> Write for Vec<u8, N> {
     fn write(&mut self, data: &[u8]) -> Result<()> {
         stack::update();
@@ -73,6 +79,20 @@ impl Read for &[u8] {
         }
 
         Ok(self[0])
+    }
+}
+
+impl<'a> BorrowRead<'a> for &'a [u8] {
+    fn borrow_read(&mut self, n: usize) -> Result<&'a [u8]> {
+        stack::update();
+        stack::update();
+        if self.len() < n {
+            return Err(Error("Insufficient data"));
+        }
+
+        let (data, rest) = self.split_at(n);
+        *self = rest;
+        Ok(data)
     }
 }
 
