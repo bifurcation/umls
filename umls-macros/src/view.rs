@@ -3,6 +3,8 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::*;
 
+use crate::enum_discriminant;
+
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
 
@@ -25,7 +27,9 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         &input.attrs,
         &input.data,
     );
-    let as_view_body = as_view(&view_name, &input.attrs, &input.data);
+    let borrow_deserialize_body = borrow_deserialize(&lifetime_generics, &input.attrs, &input.data);
+    let as_view_body = as_view(&view_name, &input.data);
+    let from_view_body = from_view(&view_name, &input.data);
 
     // struct Foo<C> where C: Crypto {
     //     a: ThingA,
@@ -68,7 +72,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
         impl #view_impl_generics BorrowDeserialize #lifetime_generics for #view_name #view_ty_generics #view_where_clause {
             fn borrow_deserialize(reader: &mut impl BorrowRead #lifetime_generics) -> Result<Self> {
-                todo!();
+                #borrow_deserialize_body
             }
         }
 
@@ -80,7 +84,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
 
             fn from_view<'a>(view: Self::View<'a>) -> Self {
-                todo!();
+                #from_view_body
             }
         }
     };
@@ -158,7 +162,80 @@ fn view_type(
     }
 }
 
-fn as_view(view_name: &Ident, _attrs: &[Attribute], data: &Data) -> TokenStream {
+fn borrow_deserialize(
+    lifetime_generics: &TokenStream,
+    attrs: &[Attribute],
+    data: &Data,
+) -> TokenStream {
+    match *data {
+        Data::Struct(ref data) => match data.fields {
+            Fields::Named(ref fields) => {
+                let recurse = fields.named.iter().map(|f| {
+                    let ty = &f.ty;
+                    let ident = &f.ident;
+
+                    let view = quote! { <#ty as View>::View #lifetime_generics };
+                    quote_spanned! {f.span()=>
+                        #ident: <#view as BorrowDeserialize>::borrow_deserialize(reader)?,
+                    }
+                });
+                quote! { Ok(Self { #(#recurse)* }) }
+            }
+            Fields::Unnamed(ref fields) => {
+                let recurse = fields.unnamed.iter().map(|f| {
+                    let ty = &f.ty;
+                    let view = quote! { <#ty as View>::View #lifetime_generics };
+                    quote_spanned! {f.span()=>
+                        <#view as BorrowDeserialize>::borrow_deserialize(reader)?,
+                    }
+                });
+                quote! { Ok(Self( #(#recurse)* )) }
+            }
+            Fields::Unit => {
+                quote! { Ok(Self) }
+            }
+        },
+
+        Data::Enum(ref data) => {
+            let recurse = data.variants.iter().map(|v| {
+                let ident = &v.ident;
+                let d_val = enum_discriminant::value(&v.attrs);
+
+                let Fields::Unnamed(fields) = &v.fields else {
+                    panic!("Invalid enum variant: Must be a tuple");
+                };
+
+                let Some(field) = fields.unnamed.iter().next() else {
+                    panic!("Invalid enum variant: Must be a tuple with at least one element");
+                };
+
+                let ty = &field.ty;
+                let view = quote! { <#ty as View>::View #lifetime_generics };
+
+                quote! {
+                    #d_val => {
+                        let val = <#view as BorrowDeserialize>::borrow_deserialize(reader)?;
+                        Ok(Self::#ident(val))
+                    }
+                }
+            });
+
+            let d_ty = enum_discriminant::ty(attrs).unwrap();
+            quote! {
+                let disc = <#d_ty as BorrowDeserialize>::borrow_deserialize(reader)?;
+                match disc {
+                    #(#recurse)*,
+                    _ => Err(Error("Invalid encoding")),
+                }
+            }
+        }
+
+        // Unions are not supported
+        Data::Union(_) => unimplemented!(),
+    }
+}
+
+fn as_view(view_name: &Ident, data: &Data) -> TokenStream {
     match *data {
         Data::Struct(ref data) => match data.fields {
             Fields::Named(ref fields) => {
@@ -195,6 +272,53 @@ fn as_view(view_name: &Ident, _attrs: &[Attribute], data: &Data) -> TokenStream 
 
             quote! {
                 match self {
+                    #(#recurse)*
+                }
+            }
+        }
+
+        // Unions are not supported
+        Data::Union(_) => unimplemented!(),
+    }
+}
+
+fn from_view(view_name: &Ident, data: &Data) -> TokenStream {
+    match *data {
+        Data::Struct(ref data) => match data.fields {
+            Fields::Named(ref fields) => {
+                let recurse = fields.named.iter().map(|f| {
+                    let ident = &f.ident;
+                    quote_spanned! {f.span()=>
+                        #ident: View::from_view(view.#ident),
+                    }
+                });
+                quote! { Self{ #(#recurse)* } }
+            }
+            Fields::Unnamed(ref fields) => {
+                let recurse = fields.unnamed.iter().enumerate().map(|(i, f)| {
+                    let index = Index::from(i);
+                    quote_spanned! {f.span()=>
+                        View::from_view(view.#index),
+                    }
+                });
+                quote! { Self( #(#recurse)* ) }
+            }
+            Fields::Unit => unimplemented!("Views for unit structs are not supported"),
+        },
+
+        Data::Enum(ref data) => {
+            let recurse = data.variants.iter().map(|v| {
+                let ident = &v.ident;
+
+                // XXX(RLB): Pretty sure this fails if the enum has a structure other than a
+                // single, unnamed fields.  But I'm not sure we care about those cases.
+                quote! {
+                    #view_name::#ident(x) => Self::#ident(View::from_view(x)),
+                }
+            });
+
+            quote! {
+                match view {
                     #(#recurse)*
                 }
             }
