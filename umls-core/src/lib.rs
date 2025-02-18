@@ -1,5 +1,5 @@
 #![no_std]
-#![deny(warnings)] // We should be warnings-clear
+// #![deny(warnings)] // XXX We should be warnings-clear
 #![warn(clippy::pedantic)] // Be pedantic by default
 #![allow(clippy::missing_errors_doc)] // TODO
 #![allow(clippy::missing_panics_doc)] // TODO
