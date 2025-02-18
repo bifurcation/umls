@@ -17,8 +17,15 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let (view_impl_generics, view_ty_generics, view_where_clause) = view_generics.split_for_impl();
 
     let view_name = format_ident!("{}View", name);
-    let view_fields = view_fields(&input.attrs, &input.data);
-    let as_view_body = as_view(&input.attrs, &input.data);
+    let view_type = view_type(
+        &view_name,
+        &view_ty_generics,
+        &view_where_clause,
+        &lifetime_generics,
+        &input.attrs,
+        &input.data,
+    );
+    let as_view_body = as_view(&view_name, &input.attrs, &input.data);
 
     // struct Foo<C> where C: Crypto {
     //     a: ThingA,
@@ -57,9 +64,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // }
 
     let expanded = quote! {
-        pub struct #view_name #view_ty_generics #where_clause {
-            #view_fields
-        }
+        #view_type
 
         impl #view_impl_generics BorrowDeserialize #lifetime_generics for #view_name #view_ty_generics #view_where_clause {
             fn borrow_deserialize(reader: &mut impl BorrowRead #lifetime_generics) -> Result<Self> {
@@ -79,7 +84,14 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     proc_macro::TokenStream::from(expanded)
 }
 
-fn view_fields(_attrs: &[Attribute], data: &Data) -> TokenStream {
+fn view_type(
+    view_name: &Ident,
+    view_ty_generics: &TypeGenerics,
+    view_where_clause: &Option<&WhereClause>,
+    lifetime_generics: &TokenStream,
+    _attrs: &[Attribute],
+    data: &Data,
+) -> TokenStream {
     match *data {
         Data::Struct(ref data) => match data.fields {
             Fields::Named(ref fields) => {
@@ -87,34 +99,51 @@ fn view_fields(_attrs: &[Attribute], data: &Data) -> TokenStream {
                     let ident = &f.ident;
                     let ty = &f.ty;
                     quote_spanned! {f.span()=>
-                        #ident: <#ty as View>::View<'a>,
+                        #ident: <#ty as View>::View #lifetime_generics,
                     }
                 });
-                quote! { #(#recurse)* }
+                quote! {
+                    pub struct #view_name #view_ty_generics #view_where_clause {
+                        #(#recurse)*
+                    }
+                }
             }
-            _ => unimplemented!(),
+            Fields::Unnamed(ref fields) => {
+                let recurse = fields.unnamed.iter().map(|f| {
+                    let ty = &f.ty;
+                    quote_spanned! {f.span()=>
+                        <#ty as View>::View  #lifetime_generics,
+                    }
+                });
+                quote! {
+                    pub struct #view_name #view_ty_generics (
+                        #(#recurse)*
+                    ) #view_where_clause;
+                }
+            }
+            Fields::Unit => unimplemented!("Views for unit structs are not supported"),
         },
 
-        _ => unimplemented!(),
-        /*
         Data::Enum(ref data) => {
-            let d_ty = enum_discriminant_type(attrs).unwrap();
             let recurse = data.variants.iter().map(|v| {
-                let ident = &v.ident;
-                let d_val = enum_discriminant_value(&v.attrs);
+                let Fields::Unnamed(fields) = &v.fields else {
+                    panic!("Invalid enum variant: Must be a tuple");
+                };
 
-                // XXX(RLB): Pretty sure this fails if the enum has a structure other than a
-                // single, unnamed fields.  But I'm not sure we care about those cases.
+                let Some(field) = fields.unnamed.iter().next() else {
+                    panic!("Invalid enum variant: Must be a tuple with at least one element");
+                };
+
+                let ident = &v.ident;
+                let ty = &field.ty;
+
                 quote! {
-                    Self::#ident(x) => {
-                        <#d_ty as Serialize>::serialize(&#d_val, writer)?;
-                        x.serialize(writer)?;
-                    },
+                    #ident(<#ty as View>::View #lifetime_generics)
                 }
             });
 
             quote! {
-                match self {
+                pub enum #view_name #view_ty_generics #view_where_clause {
                     #(#recurse)*
                 }
             }
@@ -122,11 +151,10 @@ fn view_fields(_attrs: &[Attribute], data: &Data) -> TokenStream {
 
         // Unions are not supported
         Data::Union(_) => unimplemented!(),
-        */
     }
 }
 
-fn as_view(_attrs: &[Attribute], data: &Data) -> TokenStream {
+fn as_view(view_name: &Ident, _attrs: &[Attribute], data: &Data) -> TokenStream {
     match *data {
         Data::Struct(ref data) => match data.fields {
             Fields::Named(ref fields) => {
@@ -138,24 +166,26 @@ fn as_view(_attrs: &[Attribute], data: &Data) -> TokenStream {
                 });
                 quote! { Self::View{ #(#recurse)* } }
             }
-            _ => unimplemented!(),
+            Fields::Unnamed(ref fields) => {
+                let recurse = fields.unnamed.iter().enumerate().map(|(i, f)| {
+                    let index = Index::from(i);
+                    quote_spanned! {f.span()=>
+                        self.#index.as_view(),
+                    }
+                });
+                quote! { #view_name( #(#recurse)* ) }
+            }
+            Fields::Unit => unimplemented!("Views for unit structs are not supported"),
         },
 
-        _ => unimplemented!(),
-        /*
         Data::Enum(ref data) => {
-            let d_ty = enum_discriminant_type(attrs).unwrap();
             let recurse = data.variants.iter().map(|v| {
                 let ident = &v.ident;
-                let d_val = enum_discriminant_value(&v.attrs);
 
                 // XXX(RLB): Pretty sure this fails if the enum has a structure other than a
                 // single, unnamed fields.  But I'm not sure we care about those cases.
                 quote! {
-                    Self::#ident(x) => {
-                        <#d_ty as Serialize>::serialize(&#d_val, writer)?;
-                        x.serialize(writer)?;
-                    },
+                    Self::#ident(x) => #view_name::#ident(x.as_view()),
                 }
             });
 
@@ -168,6 +198,5 @@ fn as_view(_attrs: &[Attribute], data: &Data) -> TokenStream {
 
         // Unions are not supported
         Data::Union(_) => unimplemented!(),
-        */
     }
 }

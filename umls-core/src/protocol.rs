@@ -60,10 +60,10 @@ pub mod consts {
     pub const SUPPORTED_WIRE_FORMAT: WireFormat = WireFormat(0x0002); // mls_private_message
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct BasicCredential(pub Opaque<{ consts::MAX_CREDENTIALS_SIZE }>);
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 #[discriminant = "u8"]
 pub enum Credential {
     #[discriminant = "1"]
