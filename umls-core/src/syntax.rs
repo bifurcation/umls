@@ -22,6 +22,8 @@ pub trait View {
     fn as_view<'a>(&'a self) -> Self::View<'a>
     where
         Self: 'a;
+
+    fn from_view<'a>(view: Self::View<'a>) -> Self;
 }
 
 pub trait Materialize: Serialize {
@@ -105,6 +107,10 @@ macro_rules! impl_primitive_serde {
                 stack::update();
                 *self
             }
+
+            fn from_view<'a>(view: Self::View<'a>) -> Self {
+                view
+            }
         }
 
         impl Deserialize for $t {
@@ -166,6 +172,10 @@ where
         stack::update();
         self.as_ref().map(View::as_view)
     }
+
+    fn from_view<'a>(view: Self::View<'a>) -> Self {
+        view.map(View::from_view)
+    }
 }
 
 impl<T> Deserialize for Option<T>
@@ -215,6 +225,11 @@ impl<const N: usize> View for [u8; N] {
     {
         stack::update();
         self
+    }
+
+    fn from_view<'a>(view: Self::View<'a>) -> Self {
+        stack::update();
+        view.clone()
     }
 }
 
@@ -274,6 +289,11 @@ impl View for Varint {
     {
         stack::update();
         *self
+    }
+
+    fn from_view<'a>(view: Self::View<'a>) -> Self {
+        stack::update();
+        view
     }
 }
 
@@ -340,6 +360,11 @@ where
         stack::update();
         self.iter().map(View::as_view).collect()
     }
+
+    fn from_view<'a>(view: Self::View<'a>) -> Self {
+        stack::update();
+        view.into_iter().map(View::from_view).collect()
+    }
 }
 
 impl<T: Deserialize, const N: usize> Deserialize for Vec<T, N> {
@@ -380,11 +405,17 @@ where
 }
 
 // Raw
-#[derive(Clone, PartialEq, Debug, Default)]
-pub struct Raw<const N: usize>(pub Vec<u8, N>);
+#[derive(Clone, PartialEq, Debug)]
+pub struct Raw<const N: usize>(pub [u8; N]);
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct RawView<'a, const N: usize>(pub &'a [u8; N]);
+
+impl<const N: usize> Default for Raw<N> {
+    fn default() -> Self {
+        Self([0; N])
+    }
+}
 
 impl<const N: usize> AsRef<[u8]> for Raw<N> {
     fn as_ref(&self) -> &[u8] {
@@ -398,8 +429,8 @@ impl<const N: usize> TryFrom<&[u8]> for Raw<N> {
 
     fn try_from(val: &[u8]) -> Result<Self> {
         stack::update();
-        let vec = Vec::try_from(val).map_err(|()| Error("Size error"))?;
-        Ok(Self(vec))
+        let arr = <[u8; N]>::try_from(val).map_err(|_| Error("Size error"))?;
+        Ok(Self(arr))
     }
 }
 
@@ -423,13 +454,18 @@ impl<const N: usize> View for Raw<N> {
         let slice_view: &[u8] = self.0.as_ref();
         RawView(slice_view.try_into().unwrap())
     }
+
+    fn from_view<'a>(view: Self::View<'a>) -> Self {
+        Self(*view.0)
+    }
 }
 
 impl<const N: usize> Deserialize for Raw<N> {
     fn deserialize(reader: &mut impl Read) -> Result<Self> {
         stack::update();
-        let vec = Vec::from_slice(reader.read(N)?).map_err(|()| Error("Too many elements"))?;
-        Ok(Self(vec))
+        let slice = reader.read(N)?;
+        let arr = <[u8; N]>::try_from(slice).map_err(|_| Error("Size error"))?;
+        Ok(Self(arr))
     }
 }
 
@@ -491,6 +527,11 @@ impl<const N: usize> View for Opaque<N> {
     {
         stack::update();
         OpaqueView(self.0.as_ref())
+    }
+
+    fn from_view<'a>(view: Self::View<'a>) -> Self {
+        stack::update();
+        Self::try_from(view.0).unwrap()
     }
 }
 

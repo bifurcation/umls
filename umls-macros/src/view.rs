@@ -78,6 +78,10 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             fn as_view<'a>(&'a self) -> Self::View<'a> where Self: #lifetime {
                 #as_view_body
             }
+
+            fn from_view<'a>(view: Self::View<'a>) -> Self {
+                todo!();
+            }
         }
     };
 
