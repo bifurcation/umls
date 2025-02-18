@@ -9,37 +9,6 @@ use core::fmt::Debug;
 use heapless::Vec;
 use rand::{CryptoRng, Rng};
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
-pub struct BufferVec<const N: usize>(pub Vec<u8, N>);
-
-impl<const N: usize> AsRef<[u8]> for BufferVec<N> {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-impl<const N: usize> AsMut<[u8]> for BufferVec<N> {
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.0.as_mut()
-    }
-}
-
-impl<const N: usize> Write for BufferVec<N> {
-    fn write(&mut self, data: &[u8]) -> Result<()> {
-        self.0.write(data)
-    }
-}
-
-impl<const N: usize> Buffer for BufferVec<N> {
-    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
-        self.0.extend_from_slice(other).map_err(|()| aead::Error)
-    }
-
-    fn truncate(&mut self, len: usize) {
-        self.0.truncate(len);
-    }
-}
-
 pub trait Hash: Default + Write {
     type Output;
 
@@ -533,7 +502,7 @@ where
 #[cfg(feature = "null-crypto")]
 pub mod null {
     use crate::common::Result;
-    use crate::crypto::{Buffer, BufferVec, Crypto, DependentSizes, Hash, Hmac, Initializers};
+    use crate::crypto::{Buffer, Crypto, DependentSizes, Hash, Hmac, Initializers};
     use crate::io::Write;
     use crate::protocol::{
         CipherSuite, GroupInfo, GroupSecrets, PathSecret, PrivateMessageContent, SenderData,
@@ -691,14 +660,13 @@ pub mod null {
     }
 
     impl DependentSizes for NullCrypto {
-        type SerializedRatchetTree = BufferVec<{ RatchetTree::<NullCrypto>::MAX_SIZE }>;
+        type SerializedRatchetTree = Opaque<{ RatchetTree::<NullCrypto>::MAX_SIZE }>;
         type EncryptedGroupSecrets =
-            BufferVec<{ GroupSecrets::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
-        type EncryptedGroupInfo = BufferVec<{ GroupInfo::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
-        type EncryptedPathSecret =
-            BufferVec<{ PathSecret::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
-        type EncryptedSenderData = BufferVec<{ SenderData::MAX_SIZE + AEAD_OVERHEAD }>;
+            Opaque<{ GroupSecrets::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedGroupInfo = Opaque<{ GroupInfo::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedPathSecret = Opaque<{ PathSecret::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
+        type EncryptedSenderData = Opaque<{ SenderData::MAX_SIZE + AEAD_OVERHEAD }>;
         type EncryptedPrivateMessageContent =
-            BufferVec<{ PrivateMessageContent::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
+            Opaque<{ PrivateMessageContent::<NullCrypto>::MAX_SIZE + AEAD_OVERHEAD }>;
     }
 }

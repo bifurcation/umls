@@ -1,6 +1,6 @@
 use umls_core::{
     common::{Error, Result},
-    crypto::{self, BufferVec, Crypto, DependentSizes},
+    crypto::{self, Crypto, DependentSizes},
     io::Write,
     protocol::{CipherSuite, P256_AES128GCM_SHA256_P256},
     protocol::{GroupInfo, GroupSecrets, PathSecret, PrivateMessageContent, SenderData},
@@ -419,13 +419,12 @@ impl Crypto for RustCryptoP256 {
 }
 
 impl DependentSizes for RustCryptoP256 {
-    type SerializedRatchetTree = BufferVec<{ RatchetTree::<RustCryptoP256>::MAX_SIZE }>;
+    type SerializedRatchetTree = Opaque<{ RatchetTree::<RustCryptoP256>::MAX_SIZE }>;
     type EncryptedGroupSecrets =
-        BufferVec<{ GroupSecrets::<RustCryptoP256>::MAX_SIZE + AEAD_OVERHEAD }>;
-    type EncryptedGroupInfo = BufferVec<{ GroupInfo::<RustCryptoP256>::MAX_SIZE + AEAD_OVERHEAD }>;
-    type EncryptedPathSecret =
-        BufferVec<{ PathSecret::<RustCryptoP256>::MAX_SIZE + AEAD_OVERHEAD }>;
-    type EncryptedSenderData = BufferVec<{ SenderData::MAX_SIZE + AEAD_OVERHEAD }>;
+        Opaque<{ GroupSecrets::<RustCryptoP256>::MAX_SIZE + AEAD_OVERHEAD }>;
+    type EncryptedGroupInfo = Opaque<{ GroupInfo::<RustCryptoP256>::MAX_SIZE + AEAD_OVERHEAD }>;
+    type EncryptedPathSecret = Opaque<{ PathSecret::<RustCryptoP256>::MAX_SIZE + AEAD_OVERHEAD }>;
+    type EncryptedSenderData = Opaque<{ SenderData::MAX_SIZE + AEAD_OVERHEAD }>;
     type EncryptedPrivateMessageContent =
-        BufferVec<{ PrivateMessageContent::<RustCryptoP256>::MAX_SIZE + AEAD_OVERHEAD }>;
+        Opaque<{ PrivateMessageContent::<RustCryptoP256>::MAX_SIZE + AEAD_OVERHEAD }>;
 }

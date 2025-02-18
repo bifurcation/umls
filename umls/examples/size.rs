@@ -14,9 +14,10 @@ struct TypeInfo {
     name: &'static str,
     in_memory_size: usize,
     serialized_size: usize,
+    view_size: usize,
 }
 
-fn type_info<T: Serialize>() -> TypeInfo {
+fn type_info<T: 'static + Serialize + View>() -> TypeInfo {
     let name = std::any::type_name::<T>()
         .split("<")
         .next()
@@ -29,6 +30,7 @@ fn type_info<T: Serialize>() -> TypeInfo {
         name,
         in_memory_size: std::mem::size_of::<T>(),
         serialized_size: T::MAX_SIZE,
+        view_size: std::mem::size_of::<T::View<'static>>(),
     }
 }
 

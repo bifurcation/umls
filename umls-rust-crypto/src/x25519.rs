@@ -1,6 +1,6 @@
 use umls_core::{
     common::{Error, Result},
-    crypto::{self, BufferVec, Crypto, DependentSizes},
+    crypto::{self, Crypto, DependentSizes},
     io::Write,
     protocol::{CipherSuite, X25519_AES128GCM_SHA256_ED25519},
     protocol::{GroupInfo, GroupSecrets, PathSecret, PrivateMessageContent, SenderData},
@@ -410,14 +410,12 @@ impl Crypto for RustCryptoX25519 {
 }
 
 impl DependentSizes for RustCryptoX25519 {
-    type SerializedRatchetTree = BufferVec<{ RatchetTree::<RustCryptoX25519>::MAX_SIZE }>;
+    type SerializedRatchetTree = Opaque<{ RatchetTree::<RustCryptoX25519>::MAX_SIZE }>;
     type EncryptedGroupSecrets =
-        BufferVec<{ GroupSecrets::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
-    type EncryptedGroupInfo =
-        BufferVec<{ GroupInfo::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
-    type EncryptedPathSecret =
-        BufferVec<{ PathSecret::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
-    type EncryptedSenderData = BufferVec<{ SenderData::MAX_SIZE + AEAD_OVERHEAD }>;
+        Opaque<{ GroupSecrets::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
+    type EncryptedGroupInfo = Opaque<{ GroupInfo::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
+    type EncryptedPathSecret = Opaque<{ PathSecret::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
+    type EncryptedSenderData = Opaque<{ SenderData::MAX_SIZE + AEAD_OVERHEAD }>;
     type EncryptedPrivateMessageContent =
-        BufferVec<{ PrivateMessageContent::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
+        Opaque<{ PrivateMessageContent::<RustCryptoX25519>::MAX_SIZE + AEAD_OVERHEAD }>;
 }

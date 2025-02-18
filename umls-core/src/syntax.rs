@@ -2,6 +2,7 @@ use crate::common::{Error, Result};
 use crate::io::{BorrowRead, CountWriter, Read, Write};
 use crate::stack;
 
+use aead::Buffer;
 use heapless::Vec;
 
 pub use derive_serialize::{Deserialize, Materialize, Serialize, View};
@@ -575,6 +576,22 @@ impl<'a, const N: usize> BorrowDeserialize<'a> for OpaqueView<'a, N> {
         let len = Varint::deserialize(reader)?;
         let slice = reader.borrow_read(len.0)?;
         Ok(Self(slice))
+    }
+}
+
+impl<const N: usize> Buffer for Opaque<N> {
+    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
+        self.0.extend_from_slice(other).map_err(|()| aead::Error)
+    }
+
+    fn truncate(&mut self, len: usize) {
+        self.0.truncate(len);
+    }
+}
+
+impl<const N: usize> Write for Opaque<N> {
+    fn write(&mut self, data: &[u8]) -> Result<()> {
+        self.0.write(data)
     }
 }
 
