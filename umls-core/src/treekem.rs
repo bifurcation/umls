@@ -3,13 +3,13 @@ use crate::crypto::{
     Crypto, DependentSizes, Hash, HashOutput, HpkeEncrypt, HpkePrivateKey, HpkePublicKey,
     Initializers, RawHashOutput, SignaturePrivateKey,
 };
-use crate::io::{CountWriter, Read, Write};
+use crate::io::{BorrowRead, CountWriter, Read, Write};
 use crate::protocol::{
     GroupContext, LeafIndex, LeafNode, LeafNodeSource, PathSecret, RawPathSecret, TreeHash,
     UpdatePath, UpdatePathNode,
 };
 use crate::stack;
-use crate::syntax::{Deserialize, Materialize, Nil, Serialize, Varint};
+use crate::syntax::{BorrowDeserialize, Deserialize, Materialize, Nil, Serialize, Varint, View};
 use crate::tree_math::{LeafCount, NodeCount, NodeIndex};
 
 use heapless::{FnvIndexMap, Vec};
@@ -22,8 +22,11 @@ mod consts {
     pub use crate::protocol::consts::MAX_TREE_DEPTH;
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
-pub struct RatchetTreePriv<C: Crypto> {
+#[derive(Default, Debug, Serialize, Deserialize, View)]
+pub struct RatchetTreePriv<C>
+where
+    C: Crypto,
+{
     pub encryption_priv: HpkePrivateKey<C>,
     pub path_secrets: Vec<Option<PathSecret<C>>, { consts::MAX_TREE_DEPTH }>,
     pub commit_secret: HashOutput<C>,
@@ -138,16 +141,22 @@ impl<C: Crypto> RatchetTreePriv<C> {
 type Resolution = Vec<NodeIndex, { consts::MAX_RESOLUTION_SIZE }>;
 type ResolutionPath = Vec<(NodeIndex, Resolution), { consts::MAX_TREE_DEPTH }>;
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-struct ParentNode<C: Crypto> {
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
+struct ParentNode<C>
+where
+    C: Crypto,
+{
     public_key: HpkePublicKey<C>,
     parent_hash: HashOutput<C>,
     unmerged_leaves: Vec<LeafIndex, { consts::MAX_RESOLUTION_SIZE }>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, View)]
 #[discriminant = "u8"]
-enum Node<C: Crypto> {
+enum Node<C>
+where
+    C: Crypto,
+{
     #[discriminant = "1"]
     Leaf(LeafNode<C>),
 
@@ -199,6 +208,42 @@ impl<C: Crypto> Serialize for RatchetTree<C> {
         }
 
         Ok(())
+    }
+}
+
+// TODO(RLB) Manually implement RatchetTreeView, BorrowDeserialize, and View
+pub struct RatchetTreeView<'a, C>
+where
+    C: Crypto,
+{
+    _dummy: &'a [u8],
+    _phantom: core::marker::PhantomData<C>,
+}
+
+impl<'a, C> BorrowDeserialize<'a> for RatchetTreeView<'a, C>
+where
+    C: Crypto,
+{
+    fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+        todo!()
+    }
+}
+
+impl<C> View for RatchetTree<C>
+where
+    C: Crypto,
+{
+    type View<'a> = RatchetTreeView<'a, C>;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a>
+    where
+        Self: 'a,
+    {
+        todo!()
+    }
+
+    fn from_view<'a>(view: Self::View<'a>) -> Self {
+        todo!()
     }
 }
 

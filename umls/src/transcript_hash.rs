@@ -1,20 +1,25 @@
 use umls_core::{
     common::Result,
     crypto::{Crypto, CryptoSizes, Hash, HashOutput, Signature},
-    io::{Read, Write},
+    io::{BorrowRead, Read, Write},
     protocol::{self, ConfirmationTag, ConfirmedTranscriptHash, FramedContent},
     stack,
-    syntax::{Deserialize, Serialize},
+    syntax::{BorrowDeserialize, Deserialize, Serialize, View},
 };
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InterimTranscriptHash<C: Crypto>(HashOutput<C>);
+#[derive(Debug, Serialize, Deserialize, View)]
+pub struct InterimTranscriptHash<C>(HashOutput<C>)
+where
+    C: Crypto;
 
-pub fn confirmed<C: CryptoSizes>(
+pub fn confirmed<C>(
     interim_transcript_hash: &InterimTranscriptHash<C>,
     content: &FramedContent<C>,
     signature: &Signature<C>,
-) -> Result<ConfirmedTranscriptHash<C>> {
+) -> Result<ConfirmedTranscriptHash<C>>
+where
+    C: CryptoSizes,
+{
     stack::update();
     let mut h = C::Hash::default();
 
@@ -26,10 +31,13 @@ pub fn confirmed<C: CryptoSizes>(
     Ok(ConfirmedTranscriptHash(h.finalize()))
 }
 
-pub fn interim<C: Crypto>(
+pub fn interim<C>(
     confirmed_transcript_hash: &ConfirmedTranscriptHash<C>,
     confirmation_tag: &ConfirmationTag<C>,
-) -> Result<InterimTranscriptHash<C>> {
+) -> Result<InterimTranscriptHash<C>>
+where
+    C: Crypto,
+{
     stack::update();
     let mut h = C::Hash::default();
 

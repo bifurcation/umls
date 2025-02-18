@@ -4,7 +4,7 @@ use umls_core::{
         AeadEncrypt, AeadKey, AeadNonce, Crypto, CryptoSizes, HpkeEncrypt, SerializedRatchetTree,
         SignaturePrivateKey, SignaturePublicKey,
     },
-    io::{Read, Write},
+    io::{BorrowRead, Read, Write},
     protocol::{
         self, Add, Capabilities, Commit, ConfirmedTranscriptHash, Credential,
         EncryptedGroupSecretsEntry, Epoch, FramedContent, FramedContentBinder, FramedContentTbs,
@@ -15,7 +15,7 @@ use umls_core::{
         SenderKeySource, SignedFramedContent, Welcome,
     },
     stack,
-    syntax::{Deserialize, Materialize, Serialize},
+    syntax::{BorrowDeserialize, Deserialize, Materialize, Serialize, View},
     treekem::{RatchetTree, RatchetTreePriv},
 };
 
@@ -84,8 +84,11 @@ pub enum Operation<C: CryptoSizes> {
     Remove(LeafIndex),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GroupState<C: Crypto> {
+#[derive(Debug, Serialize, Deserialize, View)]
+pub struct GroupState<C>
+where
+    C: Crypto,
+{
     // Shared state
     pub ratchet_tree: RatchetTree<C>,
     pub group_context: GroupContext<C>,
@@ -98,7 +101,10 @@ pub struct GroupState<C: Crypto> {
     pub my_ratchet_tree_priv: RatchetTreePriv<C>,
 }
 
-impl<C: CryptoSizes> GroupState<C> {
+impl<C> GroupState<C>
+where
+    C: CryptoSizes,
+{
     pub fn epoch_authenticator(&self) -> EpochAuthenticator<C> {
         stack::update();
         self.epoch_secret.epoch_authenticator()

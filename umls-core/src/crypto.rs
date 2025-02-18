@@ -1,8 +1,8 @@
 use crate::common::{Error, Result};
-use crate::io::{CountWriter, Read, Write};
+use crate::io::{BorrowRead, CountWriter, Read, Write};
 use crate::protocol::CipherSuite;
 use crate::stack;
-use crate::syntax::{Deserialize, Opaque, Serialize, Varint};
+use crate::syntax::{BorrowDeserialize, Deserialize, Opaque, Serialize, Varint, View};
 
 use aead::Buffer;
 use core::fmt::Debug;
@@ -76,7 +76,7 @@ impl<const N: usize> Initializers for Opaque<N> {
     }
 }
 
-pub trait Crypto: Clone + PartialEq + Default + Debug {
+pub trait Crypto: 'static + Clone + PartialEq + Default + Debug {
     const CIPHER_SUITE: CipherSuite;
 
     type Hash: Hash<Output = Self::HashOutput>;
@@ -91,22 +91,25 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
         + PartialEq
         + Serialize
         + Deserialize
+        + View
         + for<'a> TryFrom<&'a [u8]>
         + AsRef<[u8]>;
-    type HashOutput: Default
+    type HashOutput: 'static
+        + Default
         + Clone
         + Debug
         + PartialEq
         + Serialize
         + Deserialize
+        + View
         + for<'a> TryFrom<&'a [u8]>
         + AsRef<[u8]>
         + Initializers;
 
-    type HpkePrivateKey: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
-    type HpkePublicKey: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
-    type HpkeKemOutput: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
-    type HpkeKemSecret: Clone + Debug + Default + PartialEq + Serialize + Deserialize;
+    type HpkePrivateKey: Clone + Debug + Default + PartialEq + Serialize + Deserialize + View;
+    type HpkePublicKey: Clone + Debug + Default + PartialEq + Serialize + Deserialize + View;
+    type HpkeKemOutput: Clone + Debug + Default + PartialEq + Serialize + Deserialize + View;
+    type HpkeKemSecret: Clone + Debug + Default + PartialEq + Serialize + Deserialize + View;
 
     fn hpke_generate(
         rng: &mut impl CryptoRng,
@@ -123,9 +126,9 @@ pub trait Crypto: Clone + PartialEq + Default + Debug {
     ) -> Self::HpkeKemSecret;
     fn hpke_key_nonce(secret: Self::HpkeKemSecret) -> (Self::AeadKey, Self::AeadNonce);
 
-    type SignaturePrivateKey: Clone + Debug + PartialEq + Serialize + Deserialize;
-    type SignaturePublicKey: Clone + Debug + PartialEq + Serialize + Deserialize;
-    type Signature: Clone + Debug + PartialEq + Serialize + Deserialize;
+    type SignaturePrivateKey: Clone + Debug + PartialEq + Serialize + Deserialize + View;
+    type SignaturePublicKey: Clone + Debug + PartialEq + Serialize + Deserialize + View;
+    type Signature: Clone + Debug + PartialEq + Serialize + Deserialize + View;
 
     fn sig_generate(
         rng: &mut impl CryptoRng,
@@ -349,6 +352,7 @@ pub trait DependentSizes {
         + Write
         + Serialize
         + Deserialize
+        + View
         + Buffer;
     type EncryptedGroupSecrets: Clone
         + Default
@@ -357,6 +361,7 @@ pub trait DependentSizes {
         + Write
         + Serialize
         + Deserialize
+        + View
         + Buffer;
     type EncryptedGroupInfo: Clone
         + Default
@@ -365,6 +370,7 @@ pub trait DependentSizes {
         + Write
         + Serialize
         + Deserialize
+        + View
         + Buffer;
     type EncryptedPathSecret: Clone
         + Default
@@ -373,6 +379,7 @@ pub trait DependentSizes {
         + Write
         + Serialize
         + Deserialize
+        + View
         + Buffer;
     type EncryptedSenderData: Clone
         + Default
@@ -381,6 +388,7 @@ pub trait DependentSizes {
         + Write
         + Serialize
         + Deserialize
+        + View
         + Buffer;
     type EncryptedPrivateMessageContent: Clone
         + Default
@@ -389,6 +397,7 @@ pub trait DependentSizes {
         + Write
         + Serialize
         + Deserialize
+        + View
         + Buffer;
 }
 
@@ -412,8 +421,12 @@ pub type EncryptedPathSecret<C> = <C as DependentSizes>::EncryptedPathSecret;
 pub type EncryptedSenderData<C> = <C as DependentSizes>::EncryptedSenderData;
 pub type EncryptedPrivateMessageContent<C> = <C as DependentSizes>::EncryptedPrivateMessageContent;
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct Signed<T: Serialize + Deserialize, C: Crypto> {
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
+pub struct Signed<T, C>
+where
+    T: 'static + Serialize + Deserialize + View,
+    C: Crypto,
+{
     pub tbs: T,
     pub signature: Signature<C>,
 }
@@ -424,7 +437,7 @@ pub trait SignatureLabel {
 
 impl<T, C> Signed<T, C>
 where
-    T: Serialize + Deserialize,
+    T: 'static + Serialize + Deserialize + View,
     C: Crypto,
     Signed<T, C>: SignatureLabel,
 {
@@ -466,11 +479,11 @@ where
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, View)]
 pub struct HpkeCiphertext<C, E>
 where
     C: Crypto,
-    E: Clone + Serialize + Deserialize,
+    E: 'static + Clone + Serialize + Deserialize + View,
 {
     kem_output: HpkeKemOutput<C>,
     ciphertext: E,
@@ -479,7 +492,7 @@ where
 pub trait HpkeEncrypt<C, E>: AeadEncrypt<C, E>
 where
     C: Crypto,
-    E: Clone + Default + AsRef<[u8]> + Write + Serialize + Deserialize + Buffer,
+    E: 'static + Clone + Default + AsRef<[u8]> + Write + Serialize + Deserialize + View + Buffer,
 {
     fn hpke_seal(
         &self,
@@ -513,7 +526,7 @@ impl<T, C, E> HpkeEncrypt<C, E> for T
 where
     T: AeadEncrypt<C, E>,
     C: Crypto,
-    E: Clone + Default + AsRef<[u8]> + Write + Serialize + Deserialize + Buffer,
+    E: 'static + Clone + Default + AsRef<[u8]> + Write + Serialize + Deserialize + View + Buffer,
 {
 }
 

@@ -1,13 +1,13 @@
 use umls_core::{
     common::Result,
     crypto::{AeadKey, AeadNonce, Crypto, HashOutput, Initializers},
-    io::{Read, Write},
+    io::{BorrowRead, Read, Write},
     protocol::{
         ConfirmationTag, ConfirmedTranscriptHash, Generation, GroupContext, JoinerSecret,
         LeafIndex, SenderDataSecret,
     },
     stack,
-    syntax::{Deserialize, Materialize, Serialize},
+    syntax::{BorrowDeserialize, Deserialize, Materialize, Serialize, View},
     tree_math::LeafCount,
 };
 
@@ -69,19 +69,30 @@ member + gc --> epoch
 
 */
 
-#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
-pub struct EpochSecret<C: Crypto>(HashOutput<C>);
+#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize, View)]
+pub struct EpochSecret<C>(HashOutput<C>)
+where
+    C: Crypto;
 
 #[derive(Clone, Default, PartialEq, Debug)]
-pub struct MemberSecret<C: Crypto>(HashOutput<C>);
+pub struct MemberSecret<C>(HashOutput<C>)
+where
+    C: Crypto;
 
 #[derive(Clone, Default, PartialEq, Debug)]
-pub struct WelcomeSecret<C: Crypto>(HashOutput<C>);
+pub struct WelcomeSecret<C>(HashOutput<C>)
+where
+    C: Crypto;
 
 #[derive(Clone, Default, PartialEq, Debug)]
-pub struct EpochAuthenticator<C: Crypto>(HashOutput<C>);
+pub struct EpochAuthenticator<C>(HashOutput<C>)
+where
+    C: Crypto;
 
-impl<C: Crypto> EpochSecret<C> {
+impl<C> EpochSecret<C>
+where
+    C: Crypto,
+{
     pub fn new(rng: &mut impl CryptoRng) -> Self {
         stack::update();
         Self(C::HashOutput::random(rng))
@@ -154,7 +165,10 @@ impl<C: Crypto> EpochSecret<C> {
     }
 }
 
-pub trait KeyScheduleJoinerSecret<C: Crypto> {
+pub trait KeyScheduleJoinerSecret<C>
+where
+    C: Crypto,
+{
     fn new(
         epoch_secret: &EpochSecret<C>,
         commit_secret: &HashOutput<C>,
@@ -164,7 +178,10 @@ pub trait KeyScheduleJoinerSecret<C: Crypto> {
     fn advance(&self) -> MemberSecret<C>;
 }
 
-impl<C: Crypto> KeyScheduleJoinerSecret<C> for JoinerSecret<C> {
+impl<C> KeyScheduleJoinerSecret<C> for JoinerSecret<C>
+where
+    C: Crypto,
+{
     fn new(
         epoch_secret: &EpochSecret<C>,
         commit_secret: &HashOutput<C>,
@@ -187,7 +204,10 @@ impl<C: Crypto> KeyScheduleJoinerSecret<C> for JoinerSecret<C> {
     }
 }
 
-impl<C: Crypto> MemberSecret<C> {
+impl<C> MemberSecret<C>
+where
+    C: Crypto,
+{
     pub fn welcome_key_nonce(&self) -> (AeadKey<C>, AeadNonce<C>) {
         stack::update();
         let welcome_secret = C::derive_secret(&self.0, b"welcome");

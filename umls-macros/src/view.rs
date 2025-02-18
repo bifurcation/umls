@@ -18,6 +18,14 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let (view_impl_generics, view_ty_generics, view_where_clause) = view_generics.split_for_impl();
 
+    println!("impl:       {:?}", impl_generics);
+    println!("ty:         {:?}", ty_generics);
+    println!("where:      {:?}", where_clause);
+
+    println!("view_impl:  {:?}", view_impl_generics);
+    println!("view_ty:    {:?}", view_ty_generics);
+    println!("view_where: {:?}", view_where_clause);
+
     let view_name = format_ident!("{}View", name);
     let view_type = view_type(
         &view_name,
@@ -77,7 +85,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         }
 
         impl #impl_generics View for #name #ty_generics #where_clause {
-            type View<'a> = #view_name<'a>;
+            type View<'a> = #view_name #view_ty_generics;
 
             fn as_view<'a>(&'a self) -> Self::View<'a> where Self: #lifetime {
                 #as_view_body
@@ -88,6 +96,8 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
     };
+
+    println!("expanded: {expanded}");
 
     proc_macro::TokenStream::from(expanded)
 }
@@ -146,15 +156,19 @@ fn view_type(
                 let ty = &field.ty;
 
                 quote! {
-                    #ident(<#ty as View>::View #lifetime_generics)
+                    #ident(<#ty as View>::View #lifetime_generics),
                 }
             });
 
-            quote! {
+            let quoted = quote! {
                 pub enum #view_name #view_ty_generics #view_where_clause {
                     #(#recurse)*
                 }
-            }
+            };
+
+            println!("quoted: {}", quoted);
+
+            quoted
         }
 
         // Unions are not supported

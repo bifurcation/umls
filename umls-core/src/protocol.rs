@@ -70,7 +70,7 @@ pub enum Credential {
     Basic(BasicCredential),
 }
 
-#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct ProtocolVersion(u16);
 
 impl Default for ProtocolVersion {
@@ -80,23 +80,23 @@ impl Default for ProtocolVersion {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct CipherSuite(u16);
 
 // https://www.iana.org/assignments/mls/mls.xhtml#mls-ciphersuites
 pub const X25519_AES128GCM_SHA256_ED25519: CipherSuite = CipherSuite(0x0001);
 pub const P256_AES128GCM_SHA256_P256: CipherSuite = CipherSuite(0x0002);
 
-#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct ExtensionType(u16);
 
-#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct ProposalType(u16);
 
-#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct CredentialType(u16);
 
-#[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize, View)]
 pub struct Capabilities {
     versions: Vec<ProtocolVersion, { consts::MAX_PROTOCOL_VERSIONS }>,
     cipher_suites: Vec<CipherSuite, { consts::MAX_CIPHER_SUITES }>,
@@ -134,9 +134,12 @@ impl Default for Lifetime {
     }
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 #[discriminant = "u8"]
-pub enum LeafNodeSource<C: Crypto> {
+pub enum LeafNodeSource<C>
+where
+    C: Crypto,
+{
     #[discriminant = "1"]
     KeyPackage(Lifetime),
 
@@ -147,14 +150,17 @@ pub enum LeafNodeSource<C: Crypto> {
     Commit(HashOutput<C>),
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct LeafNodeExtension {
     extension_type: ExtensionType,
     extension_data: Opaque<{ consts::MAX_LEAF_NODE_EXTENSION_LEN }>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct LeafNodeTbs<C: Crypto> {
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
+pub struct LeafNodeTbs<C>
+where
+    C: Crypto,
+{
     pub signature_key: SignaturePublicKey<C>,
     pub encryption_key: HpkePublicKey<C>,
     pub credential: Credential,
@@ -169,14 +175,17 @@ impl<C: Crypto> SignatureLabel for LeafNode<C> {
     const SIGNATURE_LABEL: &[u8] = b"LeafNodeTBS";
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, View)]
 pub struct KeyPackageExtension {
     pub extension_type: ExtensionType,
     pub extension_data: Opaque<{ consts::MAX_KEY_PACKAGE_EXTENSION_LEN }>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct KeyPackageTbs<C: Crypto> {
+#[derive(Clone, Serialize, Deserialize, View)]
+pub struct KeyPackageTbs<C>
+where
+    C: Crypto,
+{
     pub protocol_version: ProtocolVersion,
     pub cipher_suite: CipherSuite,
     pub init_key: HpkePublicKey<C>,
@@ -190,33 +199,43 @@ impl<C: Crypto> SignatureLabel for KeyPackage<C> {
     const SIGNATURE_LABEL: &[u8] = b"KeyPackageTBS";
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct KeyPackagePriv<C: Crypto> {
+#[derive(Debug, Serialize, Deserialize, View)]
+pub struct KeyPackagePriv<C>
+where
+    C: Crypto,
+{
     pub init_priv: HpkePrivateKey<C>,
     pub encryption_priv: HpkePrivateKey<C>,
     pub signature_priv: SignaturePrivateKey<C>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct GroupId(pub Opaque<{ consts::MAX_GROUP_ID_SIZE }>);
 
-#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct Epoch(pub u64);
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
-pub struct TreeHash<C: Crypto>(pub HashOutput<C>);
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
+pub struct TreeHash<C>(pub HashOutput<C>)
+where
+    C: Crypto;
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
-pub struct ConfirmedTranscriptHash<C: Crypto>(pub HashOutput<C>);
+#[derive(Clone, Default, Debug, Serialize, Deserialize, View)]
+pub struct ConfirmedTranscriptHash<C>(pub HashOutput<C>)
+where
+    C: Crypto;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, View)]
 pub struct GroupContextExtension {
     pub extension_type: ExtensionType,
     pub extension_data: Opaque<{ consts::MAX_GROUP_CONTEXT_EXTENSION_LEN }>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GroupContext<C: Crypto> {
+#[derive(Clone, Debug, Serialize, Deserialize, View)]
+pub struct GroupContext<C>
+where
+    C: Crypto,
+{
     pub version: ProtocolVersion,
     pub cipher_suite: CipherSuite,
     pub group_id: GroupId,
@@ -242,21 +261,29 @@ impl<C: Crypto> Materialize for GroupContext<C> {
     type Storage = Vec<u8, { GROUP_CONTEXT_MAX_SIZE }>;
 }
 
-#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct LeafIndex(pub u32);
 
 // TODO(RLB) We should implement a constant-time version of PartialEq for this type.
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct ConfirmationTag<C: Crypto>(pub HashOutput<C>);
+#[derive(Clone, PartialEq, Serialize, Deserialize, View)]
+pub struct ConfirmationTag<C>(pub HashOutput<C>)
+where
+    C: Crypto;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GroupInfoExtension<C: CryptoSizes> {
+#[derive(Debug, Serialize, Deserialize, View)]
+pub struct GroupInfoExtension<C>
+where
+    C: CryptoSizes,
+{
     pub extension_type: ExtensionType,
     pub extension_data: SerializedRatchetTree<C>,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct GroupInfoTbs<C: CryptoSizes> {
+#[derive(Serialize, Deserialize, View)]
+pub struct GroupInfoTbs<C>
+where
+    C: CryptoSizes,
+{
     pub group_context: GroupContext<C>,
     pub extensions: Vec<GroupInfoExtension<C>, { consts::MAX_GROUP_INFO_EXTENSIONS }>,
     pub confirmation_tag: ConfirmationTag<C>,
@@ -271,14 +298,21 @@ impl<C: CryptoSizes> SignatureLabel for GroupInfo<C> {
 
 impl<C: CryptoSizes> AeadEncrypt<C, EncryptedGroupInfo<C>> for GroupInfo<C> {}
 
-#[derive(Serialize, Deserialize)]
-pub struct JoinerSecret<C: Crypto>(pub HashOutput<C>);
+#[derive(Serialize, Deserialize, View)]
+pub struct JoinerSecret<C>(pub HashOutput<C>)
+where
+    C: Crypto;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct PathSecret<C: Crypto>(pub HashOutput<C>);
+#[derive(Clone, Debug, Serialize, Deserialize, View)]
+pub struct PathSecret<C>(pub HashOutput<C>)
+where
+    C: Crypto;
 
-#[derive(Serialize, Deserialize)]
-pub struct GroupSecrets<C: Crypto> {
+#[derive(Serialize, Deserialize, View)]
+pub struct GroupSecrets<C>
+where
+    C: Crypto,
+{
     pub joiner_secret: JoinerSecret<C>,
     pub path_secret: Option<PathSecret<C>>,
 
@@ -290,54 +324,76 @@ impl<C: CryptoSizes> AeadEncrypt<C, EncryptedGroupSecrets<C>> for GroupSecrets<C
 
 pub type HpkeEncryptedGroupSecrets<C> = HpkeCiphertext<C, EncryptedGroupSecrets<C>>;
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub struct HashRef<C: Crypto>(pub HashOutput<C>);
+#[derive(Debug, PartialEq, Serialize, Deserialize, View)]
+pub struct HashRef<C>(pub HashOutput<C>)
+where
+    C: Crypto;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EncryptedGroupSecretsEntry<C: CryptoSizes> {
+#[derive(Debug, Serialize, Deserialize, View)]
+pub struct EncryptedGroupSecretsEntry<C>
+where
+    C: CryptoSizes,
+{
     pub new_member: HashRef<C>,
     pub encrypted_group_secrets: HpkeCiphertext<C, EncryptedGroupSecrets<C>>,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Welcome<C: CryptoSizes> {
+#[derive(Serialize, Deserialize, View)]
+pub struct Welcome<C>
+where
+    C: CryptoSizes,
+{
     pub cipher_suite: CipherSuite,
     pub secrets: Vec<EncryptedGroupSecretsEntry<C>, { consts::MAX_JOINERS_PER_WELCOME }>,
     pub encrypted_group_info: EncryptedGroupInfo<C>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct RawPathSecret<C: Crypto>(pub RawHashOutput<C>);
+#[derive(Clone, Serialize, Deserialize, View)]
+pub struct RawPathSecret<C>(pub RawHashOutput<C>)
+where
+    C: Crypto;
 
 impl<C: CryptoSizes> AeadEncrypt<C, EncryptedPathSecret<C>> for RawPathSecret<C> {}
 
 pub type HpkeEncryptedPathSecret<C> = HpkeCiphertext<C, EncryptedPathSecret<C>>;
 
-#[derive(Serialize, Deserialize)]
-pub struct UpdatePathNode<C: CryptoSizes> {
+#[derive(Serialize, Deserialize, View)]
+pub struct UpdatePathNode<C>
+where
+    C: CryptoSizes,
+{
     pub encryption_key: HpkePublicKey<C>,
     pub encrypted_path_secret: Vec<HpkeEncryptedPathSecret<C>, { consts::MAX_RESOLUTION_SIZE }>,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct UpdatePath<C: CryptoSizes> {
+#[derive(Serialize, Deserialize, View)]
+pub struct UpdatePath<C>
+where
+    C: CryptoSizes,
+{
     pub leaf_node: LeafNode<C>,
     pub nodes: Vec<UpdatePathNode<C>, { consts::MAX_TREE_DEPTH }>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Add<C: Crypto> {
+#[derive(Clone, Serialize, Deserialize, View)]
+pub struct Add<C>
+where
+    C: Crypto,
+{
     pub key_package: KeyPackage<C>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, View)]
 pub struct Remove {
     pub removed: LeafIndex,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, View)]
 #[discriminant = "u16"]
-pub enum Proposal<C: Crypto> {
+pub enum Proposal<C>
+where
+    C: Crypto,
+{
     #[discriminant = "1"]
     Add(Add<C>),
 
@@ -345,38 +401,50 @@ pub enum Proposal<C: Crypto> {
     Remove(Remove),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, View)]
 #[discriminant = "u8"]
-pub enum ProposalOrRef<C: Crypto> {
+pub enum ProposalOrRef<C>
+where
+    C: Crypto,
+{
     #[discriminant = "1"]
     Proposal(Proposal<C>),
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Commit<C: CryptoSizes> {
+#[derive(Serialize, Deserialize, View)]
+pub struct Commit<C>
+where
+    C: CryptoSizes,
+{
     pub proposals: Vec<ProposalOrRef<C>, { consts::MAX_PROPOSALS_PER_COMMIT }>,
     pub path: Option<UpdatePath<C>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, View)]
 #[discriminant = "u8"]
 pub enum Sender {
     #[discriminant = "1"]
     Member(LeafIndex),
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, View)]
 #[discriminant = "u8"]
-pub enum MessageContent<C: CryptoSizes> {
+pub enum MessageContent<C>
+where
+    C: CryptoSizes,
+{
     #[discriminant = "3"]
     Commit(Commit<C>),
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize, View)]
 pub struct PrivateMessageAad(Opaque<{ consts::MAX_PRIVATE_MESSAGE_AAD_LEN }>);
 
-#[derive(Serialize, Deserialize)]
-pub struct FramedContent<C: CryptoSizes> {
+#[derive(Serialize, Deserialize, View)]
+pub struct FramedContent<C>
+where
+    C: CryptoSizes,
+{
     pub group_id: GroupId,
     pub epoch: Epoch,
     pub sender: Sender,
@@ -384,18 +452,24 @@ pub struct FramedContent<C: CryptoSizes> {
     pub content: MessageContent<C>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, View)]
 pub struct WireFormat(u16);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, View)]
 #[discriminant = "u8"]
-pub enum FramedContentBinder<C: Crypto> {
+pub enum FramedContentBinder<C>
+where
+    C: Crypto,
+{
     #[discriminant = "1"]
     Member(GroupContext<C>),
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct FramedContentTbs<C: CryptoSizes> {
+#[derive(Serialize, Deserialize, View)]
+pub struct FramedContentTbs<C>
+where
+    C: CryptoSizes,
+{
     pub version: ProtocolVersion,
     pub wire_format: WireFormat,
     pub content: FramedContent<C>,
@@ -408,13 +482,13 @@ impl<C: CryptoSizes> SignatureLabel for SignedFramedContent<C> {
     const SIGNATURE_LABEL: &[u8] = b"FramedContentTBS";
 }
 
-#[derive(PartialEq, Serialize, Deserialize)]
+#[derive(PartialEq, Serialize, Deserialize, View)]
 pub struct Generation(pub u32);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, View)]
 pub struct ReuseGuard(pub [u8; 4]);
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[derive(Copy, Clone, Serialize, Deserialize, View)]
 struct ContentType(u8);
 
 const CONTENT_TYPE_COMMIT: ContentType = ContentType(3);
@@ -428,7 +502,7 @@ struct SenderDataAad<'a> {
     content_type: ContentType,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, View)]
 pub struct SenderData {
     pub leaf_index: LeafIndex,
     pub generation: Generation,
@@ -445,8 +519,11 @@ struct PrivateMessageContentAad<'a> {
     authenticated_data: &'a PrivateMessageAad,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct PrivateMessageContent<C: CryptoSizes> {
+#[derive(Serialize, Deserialize, View)]
+pub struct PrivateMessageContent<C>
+where
+    C: CryptoSizes,
+{
     commit: Commit<C>,
     signature: Signature<C>,
     confirmation_tag: ConfirmationTag<C>,
@@ -457,8 +534,11 @@ impl<C: CryptoSizes> AeadEncrypt<C, EncryptedPrivateMessageContent<C>>
 {
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct PrivateMessage<C: CryptoSizes> {
+#[derive(Clone, Serialize, Deserialize, View)]
+pub struct PrivateMessage<C>
+where
+    C: CryptoSizes,
+{
     group_id: GroupId,
     epoch: Epoch,
     content_type: ContentType,

@@ -63,7 +63,7 @@ where
 }
 
 // Primitives
-#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct Nil;
 
 impl<'a> TryFrom<&'a [u8]> for Nil {
@@ -83,6 +83,29 @@ impl AsRef<[u8]> for Nil {
 impl AsMut<[u8]> for Nil {
     fn as_mut(&mut self) -> &mut [u8] {
         &mut []
+    }
+}
+
+impl<'a> BorrowDeserialize<'a> for Nil {
+    fn borrow_deserialize(_reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+        Ok(Nil)
+    }
+}
+
+impl View for Nil {
+    type View<'a> = Nil;
+
+    fn as_view<'a>(&'a self) -> Self::View<'a>
+    where
+        Self: 'a,
+    {
+        stack::update();
+        *self
+    }
+
+    fn from_view<'a>(view: Self::View<'a>) -> Self {
+        stack::update();
+        view
     }
 }
 
