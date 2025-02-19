@@ -316,6 +316,7 @@ pub trait DependentSizes {
     //    EncryptedT = Opaque<{ T::MAX_SIZE + C::AEAD_OVERHEAD }>
     type SerializedRatchetTree: Clone
         + Default
+        + PartialEq
         + Debug
         + AsRef<[u8]>
         + Write
@@ -325,6 +326,7 @@ pub trait DependentSizes {
         + Buffer;
     type EncryptedGroupSecrets: Clone
         + Default
+        + PartialEq
         + Debug
         + AsRef<[u8]>
         + Write
@@ -334,6 +336,7 @@ pub trait DependentSizes {
         + Buffer;
     type EncryptedGroupInfo: Clone
         + Default
+        + PartialEq
         + Debug
         + AsRef<[u8]>
         + Write
@@ -343,6 +346,7 @@ pub trait DependentSizes {
         + Buffer;
     type EncryptedPathSecret: Clone
         + Default
+        + PartialEq
         + Debug
         + AsRef<[u8]>
         + Write
@@ -352,6 +356,7 @@ pub trait DependentSizes {
         + Buffer;
     type EncryptedSenderData: Clone
         + Default
+        + PartialEq
         + Debug
         + AsRef<[u8]>
         + Write
@@ -361,6 +366,7 @@ pub trait DependentSizes {
         + Buffer;
     type EncryptedPrivateMessageContent: Clone
         + Default
+        + PartialEq
         + Debug
         + AsRef<[u8]>
         + Write
@@ -393,7 +399,7 @@ pub type EncryptedPrivateMessageContent<C> = <C as DependentSizes>::EncryptedPri
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct Signed<T, C>
 where
-    T: 'static + Serialize + Deserialize + View,
+    T: 'static + Serialize + Deserialize + PartialEq + Debug + View,
     C: Crypto,
 {
     pub tbs: T,
@@ -406,7 +412,7 @@ pub trait SignatureLabel {
 
 impl<T, C> Signed<T, C>
 where
-    T: 'static + Serialize + Deserialize + View,
+    T: 'static + PartialEq + Debug + Serialize + Deserialize + View,
     C: Crypto,
     Signed<T, C>: SignatureLabel,
 {
@@ -448,11 +454,11 @@ where
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, View)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, View)]
 pub struct HpkeCiphertext<C, E>
 where
     C: Crypto,
-    E: 'static + Clone + Serialize + Deserialize + View,
+    E: 'static + Clone + Debug + PartialEq + Serialize + Deserialize + View,
 {
     kem_output: HpkeKemOutput<C>,
     ciphertext: E,
@@ -461,7 +467,17 @@ where
 pub trait HpkeEncrypt<C, E>: AeadEncrypt<C, E>
 where
     C: Crypto,
-    E: 'static + Clone + Default + AsRef<[u8]> + Write + Serialize + Deserialize + View + Buffer,
+    E: 'static
+        + Clone
+        + Debug
+        + PartialEq
+        + Default
+        + AsRef<[u8]>
+        + Write
+        + Serialize
+        + Deserialize
+        + View
+        + Buffer,
 {
     fn hpke_seal(
         &self,
@@ -495,7 +511,17 @@ impl<T, C, E> HpkeEncrypt<C, E> for T
 where
     T: AeadEncrypt<C, E>,
     C: Crypto,
-    E: 'static + Clone + Default + AsRef<[u8]> + Write + Serialize + Deserialize + View + Buffer,
+    E: 'static
+        + Clone
+        + Default
+        + Debug
+        + PartialEq
+        + AsRef<[u8]>
+        + Write
+        + Serialize
+        + Deserialize
+        + View
+        + Buffer,
 {
 }
 

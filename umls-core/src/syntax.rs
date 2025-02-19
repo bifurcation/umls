@@ -3,6 +3,7 @@ use crate::io::{BorrowRead, CountWriter, Read, Write};
 use crate::stack;
 
 use aead::Buffer;
+use core::fmt::Debug;
 use heapless::Vec;
 
 pub use derive_serialize::{Deserialize, Materialize, Serialize, View};
@@ -16,7 +17,7 @@ pub trait Serialize {
 }
 
 pub trait View {
-    type View<'a>: BorrowDeserialize<'a>
+    type View<'a>: BorrowDeserialize<'a> + Debug + PartialEq
     where
         Self: 'a;
 

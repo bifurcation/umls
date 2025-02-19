@@ -170,18 +170,19 @@ where
 }
 
 pub type LeafNode<C> = Signed<LeafNodeTbs<C>, C>;
+pub type LeafNodeView<'a, C> = <Signed<LeafNodeTbs<C>, C> as View>::View<'a>;
 
 impl<C: Crypto> SignatureLabel for LeafNode<C> {
     const SIGNATURE_LABEL: &[u8] = b"LeafNodeTBS";
 }
 
-#[derive(Clone, Serialize, Deserialize, View)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct KeyPackageExtension {
     pub extension_type: ExtensionType,
     pub extension_data: Opaque<{ consts::MAX_KEY_PACKAGE_EXTENSION_LEN }>,
 }
 
-#[derive(Clone, Serialize, Deserialize, View)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct KeyPackageTbs<C>
 where
     C: Crypto,
@@ -209,29 +210,29 @@ where
     pub signature_priv: SignaturePrivateKey<C>,
 }
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, View)]
 pub struct GroupId(pub Opaque<{ consts::MAX_GROUP_ID_SIZE }>);
 
-#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize, View)]
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize, View)]
 pub struct Epoch(pub u64);
 
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, View)]
 pub struct TreeHash<C>(pub HashOutput<C>)
 where
     C: Crypto;
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize, View)]
+#[derive(Clone, Default, Debug, PartialEq, Serialize, Deserialize, View)]
 pub struct ConfirmedTranscriptHash<C>(pub HashOutput<C>)
 where
     C: Crypto;
 
-#[derive(Clone, Debug, Serialize, Deserialize, View)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, View)]
 pub struct GroupContextExtension {
     pub extension_type: ExtensionType,
     pub extension_data: Opaque<{ consts::MAX_GROUP_CONTEXT_EXTENSION_LEN }>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, View)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, View)]
 pub struct GroupContext<C>
 where
     C: Crypto,
@@ -265,12 +266,12 @@ impl<C: Crypto> Materialize for GroupContext<C> {
 pub struct LeafIndex(pub u32);
 
 // TODO(RLB) We should implement a constant-time version of PartialEq for this type.
-#[derive(Clone, PartialEq, Serialize, Deserialize, View)]
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct ConfirmationTag<C>(pub HashOutput<C>)
 where
     C: Crypto;
 
-#[derive(Debug, Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct GroupInfoExtension<C>
 where
     C: CryptoSizes,
@@ -279,7 +280,7 @@ where
     pub extension_data: SerializedRatchetTree<C>,
 }
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct GroupInfoTbs<C>
 where
     C: CryptoSizes,
@@ -357,7 +358,7 @@ impl<C: CryptoSizes> AeadEncrypt<C, EncryptedPathSecret<C>> for RawPathSecret<C>
 
 pub type HpkeEncryptedPathSecret<C> = HpkeCiphertext<C, EncryptedPathSecret<C>>;
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, View)]
 pub struct UpdatePathNode<C>
 where
     C: CryptoSizes,
@@ -366,7 +367,7 @@ where
     pub encrypted_path_secret: Vec<HpkeEncryptedPathSecret<C>, { consts::MAX_RESOLUTION_SIZE }>,
 }
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(Debug, PartialEq, Serialize, Deserialize, View)]
 pub struct UpdatePath<C>
 where
     C: CryptoSizes,
@@ -375,7 +376,7 @@ where
     pub nodes: Vec<UpdatePathNode<C>, { consts::MAX_TREE_DEPTH }>,
 }
 
-#[derive(Clone, Serialize, Deserialize, View)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, View)]
 pub struct Add<C>
 where
     C: Crypto,
@@ -383,12 +384,12 @@ where
     pub key_package: KeyPackage<C>,
 }
 
-#[derive(Clone, Serialize, Deserialize, View)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, View)]
 pub struct Remove {
     pub removed: LeafIndex,
 }
 
-#[derive(Clone, Serialize, Deserialize, View)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, View)]
 #[discriminant = "u16"]
 pub enum Proposal<C>
 where
@@ -401,7 +402,7 @@ where
     Remove(Remove),
 }
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, View)]
 #[discriminant = "u8"]
 pub enum ProposalOrRef<C>
 where
@@ -411,7 +412,7 @@ where
     Proposal(Proposal<C>),
 }
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct Commit<C>
 where
     C: CryptoSizes,
@@ -420,14 +421,14 @@ where
     pub path: Option<UpdatePath<C>>,
 }
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, View)]
 #[discriminant = "u8"]
 pub enum Sender {
     #[discriminant = "1"]
     Member(LeafIndex),
 }
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, View)]
 #[discriminant = "u8"]
 pub enum MessageContent<C>
 where
@@ -437,10 +438,10 @@ where
     Commit(Commit<C>),
 }
 
-#[derive(Clone, Default, Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Clone, Default, Serialize, Deserialize, View)]
 pub struct PrivateMessageAad(Opaque<{ consts::MAX_PRIVATE_MESSAGE_AAD_LEN }>);
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct FramedContent<C>
 where
     C: CryptoSizes,
@@ -452,10 +453,10 @@ where
     pub content: MessageContent<C>,
 }
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct WireFormat(u16);
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, View)]
 #[discriminant = "u8"]
 pub enum FramedContentBinder<C>
 where
@@ -465,7 +466,7 @@ where
     Member(GroupContext<C>),
 }
 
-#[derive(Serialize, Deserialize, View)]
+#[derive(PartialEq, Debug, Serialize, Deserialize, View)]
 pub struct FramedContentTbs<C>
 where
     C: CryptoSizes,

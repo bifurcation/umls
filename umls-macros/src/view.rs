@@ -76,6 +76,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     // }
 
     let expanded = quote! {
+        #[derive(Debug, PartialEq)]
         #view_type
 
         impl #view_impl_generics BorrowDeserialize #lifetime_generics for #view_name #view_ty_generics #view_where_clause {

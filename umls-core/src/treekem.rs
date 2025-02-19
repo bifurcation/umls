@@ -5,8 +5,8 @@ use crate::crypto::{
 };
 use crate::io::{BorrowRead, CountWriter, Read, Write};
 use crate::protocol::{
-    GroupContext, LeafIndex, LeafNode, LeafNodeSource, PathSecret, RawPathSecret, TreeHash,
-    UpdatePath, UpdatePathNode,
+    GroupContext, LeafIndex, LeafNode, LeafNodeSource, LeafNodeView, PathSecret, RawPathSecret,
+    TreeHash, UpdatePath, UpdatePathNode,
 };
 use crate::stack;
 use crate::syntax::{BorrowDeserialize, Deserialize, Materialize, Nil, Serialize, Varint, View};
@@ -183,8 +183,13 @@ impl TryFrom<NodeIndex> for ParentIndex {
 // TODO(RLB): Verify that this is the correct max size.
 type TreeHashCache<C> = FnvIndexMap<(NodeIndex, usize), HashOutput<C>, { consts::MAX_GROUP_SIZE }>;
 
+// XXX(RLB): We can't derive Serialize or View here because of the custom serialization.  Worth it
+// for the savings in memory usage.
 #[derive(Default, Clone, PartialEq, Debug)]
-pub struct RatchetTree<C: Crypto> {
+pub struct RatchetTree<C>
+where
+    C: Crypto,
+{
     leaf_nodes: Vec<Option<LeafNode<C>>, { consts::MAX_GROUP_SIZE }>,
     parent_nodes: Vec<Option<ParentNode<C>>, { consts::MAX_GROUP_SIZE - 1 }>,
 }
@@ -211,13 +216,13 @@ impl<C: Crypto> Serialize for RatchetTree<C> {
     }
 }
 
-// TODO(RLB) Manually implement RatchetTreeView, BorrowDeserialize, and View
+#[derive(PartialEq, Debug)]
 pub struct RatchetTreeView<'a, C>
 where
     C: Crypto,
 {
-    _dummy: &'a [u8],
-    _phantom: core::marker::PhantomData<C>,
+    leaf_nodes: Vec<Option<LeafNodeView<'a, C>>, { consts::MAX_GROUP_SIZE }>,
+    parent_nodes: Vec<Option<ParentNodeView<'a, C>>, { consts::MAX_GROUP_SIZE - 1 }>,
 }
 
 impl<'a, C> BorrowDeserialize<'a> for RatchetTreeView<'a, C>
@@ -225,7 +230,41 @@ where
     C: Crypto,
 {
     fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
-        todo!()
+        stack::update();
+        let len = Varint::borrow_deserialize(reader)?;
+
+        let mut content = reader.take(len.0)?;
+        let mut leaf_nodes = Vec::new();
+        let mut parent_nodes = Vec::new();
+        let mut leaf = true;
+        while !content.is_empty() {
+            let node: Option<NodeView<'_, C>> =
+                BorrowDeserialize::borrow_deserialize(&mut content)?;
+            match node {
+                Some(NodeView::Leaf(node)) if leaf => leaf_nodes.push(Some(node)).unwrap(),
+                None if leaf => leaf_nodes.push(None).unwrap(),
+                Some(NodeView::Parent(node)) if !leaf => parent_nodes.push(Some(node)).unwrap(),
+                None if !leaf => parent_nodes.push(None).unwrap(),
+                _ => return Err(Error("Malformed ratchet tree")),
+            }
+
+            leaf = !leaf;
+        }
+
+        if parent_nodes.len() != leaf_nodes.len() - 1 {
+            return Err(Error("Malformed ratchet tree"));
+        }
+
+        // Pad leaf count to a power of two
+        while leaf_nodes.len().count_ones() > 1 {
+            leaf_nodes.push(None).unwrap();
+            parent_nodes.push(None).unwrap();
+        }
+
+        Ok(Self {
+            leaf_nodes,
+            parent_nodes,
+        })
     }
 }
 
@@ -234,16 +273,20 @@ where
     C: Crypto,
 {
     type View<'a> = RatchetTreeView<'a, C>;
-
     fn as_view<'a>(&'a self) -> Self::View<'a>
     where
         Self: 'a,
     {
-        todo!()
+        Self::View {
+            leaf_nodes: self.leaf_nodes.as_view(),
+            parent_nodes: self.parent_nodes.as_view(),
+        }
     }
-
     fn from_view<'a>(view: Self::View<'a>) -> Self {
-        todo!()
+        Self {
+            leaf_nodes: View::from_view(view.leaf_nodes),
+            parent_nodes: View::from_view(view.parent_nodes),
+        }
     }
 }
 
