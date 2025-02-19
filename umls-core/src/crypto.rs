@@ -2,7 +2,7 @@ use crate::common::{Error, Result};
 use crate::io::{BorrowRead, CountWriter, Read, Write};
 use crate::protocol::CipherSuite;
 use crate::stack;
-use crate::syntax::{BorrowDeserialize, Deserialize, Opaque, Serialize, Varint, View};
+use crate::syntax::{Deserialize, Opaque, Parse, Serialize, Varint, View};
 
 use aead::Buffer;
 use core::fmt::Debug;

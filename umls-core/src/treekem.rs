@@ -9,7 +9,7 @@ use crate::protocol::{
     TreeHash, UpdatePath, UpdatePathNode,
 };
 use crate::stack;
-use crate::syntax::{BorrowDeserialize, Deserialize, Materialize, Nil, Serialize, Varint, View};
+use crate::syntax::{Deserialize, Materialize, Nil, Parse, Serialize, Varint, View};
 use crate::tree_math::{LeafCount, NodeCount, NodeIndex};
 
 use heapless::{FnvIndexMap, Vec};
@@ -225,21 +225,20 @@ where
     parent_nodes: Vec<Option<ParentNodeView<'a, C>>, { consts::MAX_GROUP_SIZE - 1 }>,
 }
 
-impl<'a, C> BorrowDeserialize<'a> for RatchetTreeView<'a, C>
+impl<'a, C> Parse<'a> for RatchetTreeView<'a, C>
 where
     C: Crypto,
 {
-    fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+    fn parse(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
         stack::update();
-        let len = Varint::borrow_deserialize(reader)?;
+        let len = Varint::parse(reader)?;
 
         let mut content = reader.take(len.0)?;
         let mut leaf_nodes = Vec::new();
         let mut parent_nodes = Vec::new();
         let mut leaf = true;
         while !content.is_empty() {
-            let node: Option<NodeView<'_, C>> =
-                BorrowDeserialize::borrow_deserialize(&mut content)?;
+            let node: Option<NodeView<'_, C>> = Parse::parse(&mut content)?;
             match node {
                 Some(NodeView::Leaf(node)) if leaf => leaf_nodes.push(Some(node)).unwrap(),
                 None if leaf => leaf_nodes.push(None).unwrap(),

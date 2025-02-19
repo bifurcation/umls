@@ -4,7 +4,7 @@ use umls_core::{
     io::{BorrowRead, Read, Write},
     protocol::{self, ConfirmationTag, ConfirmedTranscriptHash, FramedContent},
     stack,
-    syntax::{BorrowDeserialize, Deserialize, Serialize, View},
+    syntax::{Deserialize, Parse, Serialize, View},
 };
 
 #[derive(Debug, Serialize, Deserialize, View)]

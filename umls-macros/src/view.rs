@@ -18,14 +18,6 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let (view_impl_generics, view_ty_generics, view_where_clause) = view_generics.split_for_impl();
 
-    println!("impl:       {:?}", impl_generics);
-    println!("ty:         {:?}", ty_generics);
-    println!("where:      {:?}", where_clause);
-
-    println!("view_impl:  {:?}", view_impl_generics);
-    println!("view_ty:    {:?}", view_ty_generics);
-    println!("view_where: {:?}", view_where_clause);
-
     let view_name = format_ident!("{}View", name);
     let view_type = view_type(
         &view_name,
@@ -35,7 +27,7 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         &input.attrs,
         &input.data,
     );
-    let borrow_deserialize_body = borrow_deserialize(&lifetime_generics, &input.attrs, &input.data);
+    let parse_body = parse(&lifetime_generics, &input.attrs, &input.data);
     let as_view_body = as_view(&view_name, &input.data);
     let from_view_body = from_view(&view_name, &input.data);
 
@@ -51,11 +43,11 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     //     b: ThingB::View<'a>,
     // }
     //
-    // impl<'a> BorrowDeserialize<'a> for FooView<'a, C> where C: Crypto {
-    //     fn borrow_deserialize(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
+    // impl<'a> Parse<'a> for FooView<'a, C> where C: Crypto {
+    //     fn parse(reader: &mut impl BorrowRead<'a>) -> Result<Self> {
     //          Ok(Self {
-    //              a: <ThingA::View<'a> as BorrowRead<'a>>::borrow_deserialize(),
-    //              b: <ThingB::View<'a> as BorrowRead<'a>>::borrow_deserialize(),
+    //              a: <ThingA::View<'a> as BorrowRead<'a>>::parse(),
+    //              b: <ThingB::View<'a> as BorrowRead<'a>>::parse(),
     //          })
     //     }
     // }
@@ -79,9 +71,9 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         #[derive(Debug, PartialEq)]
         #view_type
 
-        impl #view_impl_generics BorrowDeserialize #lifetime_generics for #view_name #view_ty_generics #view_where_clause {
-            fn borrow_deserialize(reader: &mut impl BorrowRead #lifetime_generics) -> Result<Self> {
-                #borrow_deserialize_body
+        impl #view_impl_generics Parse #lifetime_generics for #view_name #view_ty_generics #view_where_clause {
+            fn parse(reader: &mut impl BorrowRead #lifetime_generics) -> Result<Self> {
+                #parse_body
             }
         }
 
@@ -97,8 +89,6 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
     };
-
-    println!("expanded: {expanded}");
 
     proc_macro::TokenStream::from(expanded)
 }
@@ -161,15 +151,11 @@ fn view_type(
                 }
             });
 
-            let quoted = quote! {
+            quote! {
                 pub enum #view_name #view_ty_generics #view_where_clause {
                     #(#recurse)*
                 }
-            };
-
-            println!("quoted: {}", quoted);
-
-            quoted
+            }
         }
 
         // Unions are not supported
@@ -177,11 +163,7 @@ fn view_type(
     }
 }
 
-fn borrow_deserialize(
-    lifetime_generics: &TokenStream,
-    attrs: &[Attribute],
-    data: &Data,
-) -> TokenStream {
+fn parse(lifetime_generics: &TokenStream, attrs: &[Attribute], data: &Data) -> TokenStream {
     match *data {
         Data::Struct(ref data) => match data.fields {
             Fields::Named(ref fields) => {
@@ -191,7 +173,7 @@ fn borrow_deserialize(
 
                     let view = quote! { <#ty as View>::View #lifetime_generics };
                     quote_spanned! {f.span()=>
-                        #ident: <#view as BorrowDeserialize>::borrow_deserialize(reader)?,
+                        #ident: <#view as Parse>::parse(reader)?,
                     }
                 });
                 quote! { Ok(Self { #(#recurse)* }) }
@@ -201,7 +183,7 @@ fn borrow_deserialize(
                     let ty = &f.ty;
                     let view = quote! { <#ty as View>::View #lifetime_generics };
                     quote_spanned! {f.span()=>
-                        <#view as BorrowDeserialize>::borrow_deserialize(reader)?,
+                        <#view as Parse>::parse(reader)?,
                     }
                 });
                 quote! { Ok(Self( #(#recurse)* )) }
@@ -229,7 +211,7 @@ fn borrow_deserialize(
 
                 quote! {
                     #d_val => {
-                        let val = <#view as BorrowDeserialize>::borrow_deserialize(reader)?;
+                        let val = <#view as Parse>::parse(reader)?;
                         Ok(Self::#ident(val))
                     }
                 }
@@ -237,7 +219,7 @@ fn borrow_deserialize(
 
             let d_ty = enum_discriminant::ty(attrs).unwrap();
             quote! {
-                let disc = <#d_ty as BorrowDeserialize>::borrow_deserialize(reader)?;
+                let disc = <#d_ty as Parse>::parse(reader)?;
                 match disc {
                     #(#recurse)*,
                     _ => Err(Error("Invalid encoding")),

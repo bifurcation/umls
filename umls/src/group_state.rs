@@ -15,7 +15,7 @@ use umls_core::{
         SenderKeySource, SignedFramedContent, Welcome,
     },
     stack,
-    syntax::{BorrowDeserialize, Deserialize, Materialize, Serialize, View},
+    syntax::{Deserialize, Materialize, Parse, Serialize, View},
     treekem::{RatchetTree, RatchetTreePriv},
 };
 

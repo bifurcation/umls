@@ -8,7 +8,7 @@ use crate::crypto::{
 };
 use crate::io::{BorrowRead, Read, Write};
 use crate::stack;
-use crate::syntax::{BorrowDeserialize, Deserialize, Materialize, Nil, Opaque, Serialize, View};
+use crate::syntax::{Deserialize, Materialize, Nil, Opaque, Parse, Serialize, View};
 
 use heapless::Vec;
 

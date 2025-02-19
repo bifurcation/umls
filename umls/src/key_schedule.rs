@@ -7,7 +7,7 @@ use umls_core::{
         LeafIndex, SenderDataSecret,
     },
     stack,
-    syntax::{BorrowDeserialize, Deserialize, Materialize, Serialize, View},
+    syntax::{Deserialize, Materialize, Parse, Serialize, View},
     tree_math::LeafCount,
 };
 
