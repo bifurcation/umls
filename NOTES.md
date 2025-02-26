@@ -1,41 +1,81 @@
+# Minimizing memory usage
+
+## Emprical
+
+Using GDB:
+https://interrupt.memfault.com/blog/measuring-stack-usage
+https://nusgreyhats.org/posts/writeups/basic-lldb-scripting/
+
+Using `-Z emit-stack-sizes`:
+https://doc.rust-lang.org/beta/unstable-book/compiler-flags/emit-stack-sizes.html
+
+Using stack painting:
+...
 
 
-(SignatureKey, Credential) -> (KeyPackagePriv, KeyPackage)
+## Theoretical
 
-(KeyPackagePrivView, KeyPackageView) -> (GroupState, RatchetTree)
+There are two things that are expensive:
 
-(KeyPackagePrivView, KeyPackageView, WelcomeView) -> (GroupState, RatchetTree)
+* Joining the group
+* Sending a commit
 
-(GroupStateView, RatchetTreeView, KeyPackageView) -> (GroupState, RatchetTree, Commit, Welcome)
-
-(GroupStateView, RatchetTreeView, LeafIndex) -> (GroupState, RatchetTree, Commit)
-
-(GroupStateView, RatchetTreeView, CommitView) -> (GroupState, RatchetTree)
+And we should keep in mind that the inputs / outputs are immediately bound
+to/from serial data.  So there are advantages to working in serialized form
 
 
+### Join group
+
+* In: KeyPackagePriv, Welcome
+* Out: RatchetTree, GroupState
+
+Potential memory layout:
+
+```
+ Input: |<-KPP->|<--------------Welcome-------------->|
+Output:                  |<--------RatchetTree------->|<-GS->|  
+```
+
+Requires:
+* Mutable parse => in-place decrypt without taking ownership
+* Lazy parse => Don't materialize the tree in memory
+
+Serialize @128
+KeyPackagePriv     99
+Welcome         82000
+GroupState      82120
+                =====
+               164219
+
+Inline
+KeyPackagePriv     99
+Welcome         82000
+GroupState        555
+                =====
+                82654
 
 
+### Send Commit
 
-Commit
-CommitView
+* In: GroupState, Ops, RatchetTree
+* Out: GroupState, Commit, Welcome
 
-Credential
+Serialized @128
+GroupState      82120
+  RatchetTree   81565
+Commit          61355
+Welcome         82000
 
-GroupState
-GroupStateView
+Split GroupState from RatchetTree
+GroupState        555
+RatchetTree     81565
+Commit          61355
+Welcome         82000
 
-KeyPackage
-KeyPackagePriv
-
-KeyPackagePrivView
-KeyPackageView
-
-LeafIndex
-
-RatchetTree
-RatchetTreeView
-
-SignatureKey
-
-Welcome
-WelcomeView
+AES-CM on RatchetTree => take it out of GroupInfo
+GroupState        555
+RatchetTree     81565
+Commit          61355
+Welcome           435
+                =====
+               143900

@@ -13,6 +13,15 @@ fn main() {
     #[cfg(not(feature = "null-crypto"))]
     use umls_rust_crypto::RustCryptoX25519 as CryptoProvider;
 
+    #[no_mangle]
+    fn join_group(
+        kp_priv: KeyPackagePriv<CryptoProvider>,
+        kp: &KeyPackage<CryptoProvider>,
+        welcome: Welcome<CryptoProvider>,
+    ) -> GroupState<CryptoProvider> {
+        GroupState::join(kp_priv, kp, welcome).unwrap()
+    }
+
     let mut rng = rand::rng();
 
     // Create the first user
@@ -43,8 +52,13 @@ fn main() {
         stack::usage(|| state_a.send_commit(&mut rng, op).unwrap());
 
     // Second user joins the group
+    let mut state_b = join_group(kp_priv, &kp, welcome_1.unwrap());
+    let join_group_1_stack = 0;
+
+    /*
     let (mut state_b, join_group_1_stack) =
         stack::usage(|| GroupState::join(kp_priv, &kp, welcome_1.unwrap()).unwrap());
+    */
 
     println!("make_key_package_0: {:8}", make_key_package_0_stack);
     println!("create_group:       {:8}", create_group_stack);
